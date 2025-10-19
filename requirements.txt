@@ -1,0 +1,40 @@
+# -----------------------------
+# Core Python Libraries
+# -----------------------------
+numpy
+pandas
+
+# -----------------------------
+# Image Processing & OCR
+# -----------------------------
+opencv-python
+pytesseract
+Pillow
+easyocr
+
+# -----------------------------
+# NLP and AI Models
+# -----------------------------
+transformers
+torch
+sentencepiece
+accelerate
+spacy
+
+# -----------------------------
+# Web and API Requests
+# -----------------------------
+requests
+flask
+streamlit
+python-dotenv
+
+# -----------------------------
+# Utilities and Tools
+# -----------------------------
+matplotlib
+
+# -----------------------------
+# Testing
+# -----------------------------
+pytest
