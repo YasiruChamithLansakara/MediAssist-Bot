@@ -1,0 +1,96 @@
+# -----------------------------
+# Python cache and compiled files
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# -----------------------------
+# Virtual environments
+# -----------------------------
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# -----------------------------
+# Jupyter Notebook checkpoints
+# -----------------------------
+.ipynb_checkpoints/
+
+# -----------------------------
+# System files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# IDE / Editor settings
+# -----------------------------
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------
+# Logs and temporary files
+# -----------------------------
+*.log
+*.tmp
+*.swp
+*.bak
+
+# -----------------------------
+# Data and model outputs
+# -----------------------------
+data/processed/
+data/tmp/
+models/
+outputs/
+runs/
+
+# -----------------------------
+# Uploaded images or test data
+# -----------------------------
+data/sample_prescriptions/
+data/raw/
+*.jpg
+*.jpeg
+*.png
+
+# -----------------------------
+# Environment / secrets
+# -----------------------------
+.env
+*.env
+config.json
+mediassist/config.py  # if contains API keys
+
+# -----------------------------
+# Pytest / coverage files
+# -----------------------------
+.cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# -----------------------------
+# Web dependencies and builds
+# -----------------------------
+node_modules/
+build/
+dist/
+*.egg-info/
+*.manifest
+*.spec
+
+# -----------------------------
+# Colab and notebook extras
+# -----------------------------
+*.ipynb_checkpoints
+*.ipynb_save
