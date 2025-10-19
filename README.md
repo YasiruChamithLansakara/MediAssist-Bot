@@ -1,4 +1,3 @@
-```markdown
 # 🧠 MediAssist Bot
 ### An AI-powered assistant that reads doctor prescriptions, extracts medicine names, and provides intelligent medical guidance.
 
@@ -187,5 +186,3 @@ This project is open-source and available under the [MIT License](LICENSE).
 ---
 
 ### 🩺 Developed with ❤️ by Team MediAssist
-
-```
