@@ -1,38 +1,103 @@
 # 🧠 MediAssist Bot
-### An AI-powered assistant that reads doctor prescriptions, extracts medicine names, and provides intelligent medical guidance.
+### 💊 AI-Based Medication Assistant for Chronic Diseases
 
 ---
 
-## 🚀 Project Overview
-**MediAssist Bot** is an AI-based system designed to help users understand medical prescriptions.  
-It can:
-1. Read **handwritten or typed prescriptions** using OCR.
-2. Extract **medicine names** using NLP techniques.
-3. Provide **AI-powered advice** (like medicine information, side effects, and interactions).
-4. Allow users to **chat** with the bot for further questions.
+## 📌 Overview
+
+**MediAssist Bot** is an academic **AI-based medication understanding system** designed to assist patients—especially those with **chronic diseases**—in understanding **doctor prescriptions**.
+
+The system focuses on:
+- Reading **handwritten or printed prescriptions**
+- Extracting **medicine names and dosage information**
+- Providing **safe, non-diagnostic explanations** using trusted medical data
+- Supporting users through a **chat-based interface**
+
+⚠️ This project is developed as a **Proof-of-Concept (PoC)** for educational purposes only.
+
+---
+
+## 🚨 Problem Statement
+
+Chronic disease patients worldwide often struggle to understand handwritten doctor prescriptions. These prescriptions can be unclear not only to patients but sometimes even to pharmacists. Misunderstanding medicine names, dosages, and instructions may lead to incorrect medication usage and serious health risks.
+
+Existing online platforms are often unreliable, not user-friendly, and lack proper medical grounding. Therefore, there is a need for a **technically improved AI-based system** that provides **clear, patient-friendly explanations** using **valid and trusted medical data sources**, without replacing healthcare professionals.
+
+---
+
+## 💡 Project Idea
+
+An AI-powered assistant that helps patients understand:
+- Medicines prescribed by doctors  
+- Dosage patterns and instructions  
+- General purpose, warnings, side effects, and contraindications  
+
+The system uses:
+- **OCR** for prescription text extraction  
+- **NLP & Transformer models** for medication entity extraction  
+- **Retrieval-Augmented Generation (RAG)** for grounded explanations  
+- A **chat interface** for user interaction  
+
+---
+
+## 🎯 Target Chronic Diseases
+
+- Diabetes  
+- Hypertension  
+- Asthma  
+- Heart Disease  
+- Arthritis  
+- Migraine  
+
+> These diseases require long-term medication usage and are common globally, with better public dataset availability.
+
+---
+
+## 👥 Target Audience
+
+- Patients with chronic diseases  
+- Elderly patients  
+- Caregivers  
+- AI students  
+- Medical students  
+- Pharmacy students  
+
+---
+
+## 🌍 Region
+
+- **Sri Lanka (Academic Context)**
 
 ---
 
 ## 🧩 System Architecture
-```
 
-[Prescription Image]
-↓
-OCR Module (image → text)
-↓
-Medicine Extraction (NER / Matching)
-↓
-AI Advice Engine (transformers pipeline)
-↓
-Chat Interface (Streamlit / Flask)
-
+```text
+User selects disease → Enter age
+            ↓
+Prescription Image / Text Query
+            ↓
+OCR → Text Extraction
+            ↓
+Text Cleaning & Parsing
+            ↓
+NLP → Medicine Name & Dosage Extraction
+            ↓
+Vector Database (FAISS) → Drug Lookup:
+ - openFDA → dosage, warnings
+ - DrugBank → drug class
+ - Kaggle / MedDRA → high-level indication
+            ↓ (RAG)
+LLM → Safe explanation + disclaimer
+            ↓
+Chat Interface (UI)
 ```
 
 ---
 
 ## 🗂️ Project Structure
-```
 
+```text
 MediAssistBot/
 │
 ├── README.md
@@ -40,41 +105,40 @@ MediAssistBot/
 ├── .gitignore
 │
 ├── data/
-│   ├── raw/
-│   ├── processed/
-│   ├── medicine_list.csv
-│   └── sample_prescriptions/
+│ ├── raw/
+│ ├── processed/
+│ ├── medicine_list.csv
+│ └── sample_prescriptions/
 │
 ├── notebooks/
-│   ├── 01_OCR_testing.ipynb
-│   ├── 02_Medicine_Extraction.ipynb
-│   └── 03_AI_Advice_Testing.ipynb
+│ ├── 01_OCR_testing.ipynb
+│ ├── 02_Medicine_Extraction.ipynb
+│ └── 03_AI_Advice_Testing.ipynb
 │
 ├── mediassist/
-│   ├── **init**.py
-│   ├── ocr_module.py
-│   ├── medicine_extractor.py
-│   ├── ai_advice.py
-│   ├── chat_interface.py
-│   ├── utils.py
-│   └── config.py
+│ ├── init.py
+│ ├── ocr_module.py
+│ ├── medicine_extractor.py
+│ ├── ai_advice.py
+│ ├── chat_interface.py
+│ ├── utils.py
+│ └── config.py
 │
 ├── webapp/
-│   ├── app.py
-│   ├── templates/
-│   ├── static/
+│ ├── app.py
+│ ├── templates/
+│ └── static/
 │
 ├── tests/
-│   ├── test_ocr.py
-│   ├── test_medicine_extractor.py
-│   └── test_ai_advice.py
+│ ├── test_ocr.py
+│ ├── test_medicine_extractor.py
+│ └── test_ai_advice.py
 │
 └── scripts/
 ├── run_ocr.py
 ├── run_extraction.py
 └── run_chat.py
-
-````
+```
 
 ---
 
@@ -84,17 +148,15 @@ MediAssistBot/
 ```bash
 git clone https://github.com/YasiruChamithLansakara/MediAssist-Bot.git
 cd MediAssistBot
-````
+```
 
-### 2️⃣ Create Virtual Environment (Optional)
-
+### 2️⃣ Create Virtual Environment
 ```bash
 python -m venv venv
 source venv/bin/activate     # On Windows: venv\Scripts\activate
 ```
 
 ### 3️⃣ Install Requirements
-
 ```bash
 pip install -r requirements.txt
 ```
@@ -103,30 +165,55 @@ pip install -r requirements.txt
 
 ## 🧠 How It Works
 
-### 🔹 Step 1: OCR Module
+### 1️⃣ OCR Processing
+- Extracts text from prescription images
+- Handles noisy and handwritten text
 
-* Converts uploaded prescription images into readable text.
-* Uses **OpenCV + PyTesseract + EasyOCR**.
+### 2️⃣ Medication Extraction (NLP)
+- Identifies medicine names and dosage
+- Uses transformer-based models
 
-### 🔹 Step 2: Medicine Extraction
+### 3️⃣ Knowledge Retrieval + LLM
+- Retrieves verified drug information
+- Generates grounded explanations with disclaimers
 
-* Identifies medicine names using **spaCy** or **transformer-based models**.
-* Can also use a predefined **medicine list** for matching.
+### 4️⃣ Chat Interface
+- Allows follow-up questions
+- Maintains conversation context
 
-### 🔹 Step 3: AI Advice
+---
 
-* Uses **Hugging Face transformers pipeline** for contextual responses.
-* Provides **medicine usage, side effects, and warnings**.
+## 📊 Datasets Used
 
-### 🔹 Step 4: Chat Interface
+| Data Type | Source |
+|---------|--------|
+| Disease data | Kaggle |
+| Medicine name | openFDA |
+| Brand / Generic names | openFDA |
+| Drug class | DrugBank |
+| Purpose & indications | openFDA, DrugBank |
+| Dosage patterns | openFDA, MedDRA |
+| Side effects & warnings | openFDA, MedDRA |
+| Contraindications | DrugBank, openFDA |
+| Handwritten prescriptions | Kaggle / HF (synthetic & public) |
 
-* Simple interface built with **Streamlit or Flask**.
-* Lets users upload images and chat with the bot.
+> All datasets are **public, trusted, and ethically approved**.
+
+---
+
+## 🛠️ Tools & Technologies
+
+- **Programming:** Python, NumPy, Pandas, matplotlib, seaborn, scikit-learn 
+- **OCR:** DeepseekOCR  
+- **NLP / Transformers:** BioBERT  
+- **Vector Database:** FAISS  
+- **Knowledge Retrieval:** RAG (Retrieval-Augmented Generation)  
+- **Backend:** FastAPI  
+- **UI:** Streamlit  
 
 ---
 
 ## 🧪 Example Usage
-
 ```bash
 # Run OCR on a prescription
 python scripts/run_ocr.py
@@ -140,49 +227,49 @@ streamlit run webapp/app.py
 
 ---
 
-## 👥 Team Roles (Suggested)
+## ⚠️ Safety, Ethics & Disclaimer
 
-| Member   | Responsibility             |
-| -------- | -------------------------- |
-| Member 1 | OCR Module & Preprocessing |
-| Member 2 | Medicine Extraction (NLP)  |
-| Member 3 | AI Advice & Chat Interface |
-| Member 4 | Integration & Testing      |
-
----
-
-## 📦 Dependencies
-
-See [`requirements.txt`](./requirements.txt) for the full list.
-Key packages:
-
-* **OpenCV, PyTesseract, EasyOCR** → image to text
-* **spaCy, transformers, torch** → NLP & AI
-* **Flask / Streamlit** → web chat interface
-* **requests, dotenv** → API connections and configuration
+- For **educational and informational purposes only**
+- No diagnosis, treatment, or medical decision-making
+- Mandatory medical disclaimer included
+- Explicit uncertainty handling
+- No patient-identifiable data stored
+- Secure handling of uploaded data
 
 ---
 
-## ⚠️ Disclaimer
+## ⏳ Project Timeline (46 Days)
 
-MediAssist Bot is for **educational and informational purposes only**.
-It **does not replace professional medical advice or diagnosis**.
+| Phase | Activity | Duration |
+|---|---|---|
+| Phase 1 | Literature review & dataset preparation | 7 days |
+| Phase 2 | OCR module development | 8 days |
+| Phase 3 | NLP extraction & drug mapping | 10 days |
+| Phase 4 | LLM & chat integration | 10 days |
+| Phase 5 | Testing & evaluation | 7 days |
+| Phase 6 | Documentation & presentation | 3 days |
 
 ---
 
-## 🧾 License
+## 📜 License
 
-This project is open-source and available under the [MIT License](LICENSE).
+This project is released under the **MIT License**.
 
 ---
 
 ## ⭐ Contribution Guidelines
 
-1. Create a new branch for your feature.
-2. Commit descriptive messages.
-3. Submit a pull request for review.
-4. Keep code modular and documented.
+**1.** Create a new branch for your feature
+
+**2.** Commit descriptive messages
+
+**3.** Submit a pull request for review
+
+**4.** Keep code modular and documented
 
 ---
 
-### 🩺 Developed with ❤️ by Team MediAssist
+## 🧬 Developed by  
+**Team MediAssist ❤️**
+
+© 2026 Team MediAssist. All Rights Reserved.
