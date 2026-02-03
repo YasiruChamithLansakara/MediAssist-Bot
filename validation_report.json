@@ -1,0 +1,136 @@
+{
+  "missing_values": {
+    "column": [
+      "drug_id",
+      "generic_name",
+      "generic_name_clean",
+      "brand_names",
+      "drug_class",
+      "route",
+      "indications",
+      "dosage_and_administration",
+      "warnings",
+      "contraindications",
+      "side_effects_all",
+      "side_effects_label_confirmed",
+      "sources",
+      "last_updated",
+      "top_label_confirmed_side_effects",
+      "top_all_side_effects",
+      "side_effect_count_label_confirmed",
+      "side_effect_count_all",
+      "common_side_effects",
+      "less_common_side_effects",
+      "rare_side_effects",
+      "postmarketing_side_effects",
+      "unknown_frequency_side_effects"
+    ],
+    "count": [
+      0,
+      0,
+      0,
+      0,
+      2900,
+      0,
+      466,
+      465,
+      1994,
+      1882,
+      3868,
+      3868,
+      0,
+      0,
+      3361,
+      3361,
+      0,
+      0,
+      3361,
+      3402,
+      3473,
+      3507,
+      3559
+    ],
+    "percentage": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      74.9741468459152,
+      0.0,
+      12.047569803516028,
+      12.02171664943123,
+      51.551189245087905,
+      48.655635987590486,
+      100.0,
+      100.0,
+      0.0,
+      0.0,
+      86.89245087900724,
+      86.89245087900724,
+      0.0,
+      0.0,
+      86.89245087900724,
+      87.95243019648396,
+      89.78800413650465,
+      90.6670113753878,
+      92.01137538779732
+    ]
+  },
+  "duplicates": {
+    "total_duplicates": "0",
+    "percentage": 0.0
+  },
+  "column_types": {
+    "drug_id": "str",
+    "generic_name": "str",
+    "generic_name_clean": "str",
+    "brand_names": "str",
+    "drug_class": "str",
+    "route": "str",
+    "indications": "str",
+    "dosage_and_administration": "str",
+    "warnings": "str",
+    "contraindications": "str",
+    "side_effects_all": "float64",
+    "side_effects_label_confirmed": "float64",
+    "sources": "str",
+    "last_updated": "str",
+    "top_label_confirmed_side_effects": "str",
+    "top_all_side_effects": "str",
+    "side_effect_count_label_confirmed": "int64",
+    "side_effect_count_all": "int64",
+    "common_side_effects": "str",
+    "less_common_side_effects": "str",
+    "rare_side_effects": "str",
+    "postmarketing_side_effects": "str",
+    "unknown_frequency_side_effects": "str"
+  },
+  "completeness": {
+    "mean_completeness": 55.637111640663626,
+    "min_completeness": 39.130434782608695,
+    "max_completeness": 91.30434782608695,
+    "rows_with_<80%_data": "3481"
+  },
+  "critical_fields": {
+    "drug_id": {
+      "populated": "3868",
+      "empty": "0",
+      "percentage": 100.0
+    },
+    "generic_name": {
+      "populated": "3868",
+      "empty": "0",
+      "percentage": 100.0
+    },
+    "indications": {
+      "populated": "3402",
+      "empty": "466",
+      "percentage": 87.95243019648396
+    },
+    "warnings": {
+      "populated": "1874",
+      "empty": "1994",
+      "percentage": 48.448810754912095
+    }
+  }
+}
