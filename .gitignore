@@ -47,7 +47,6 @@ Thumbs.db
 # -----------------------------
 # Data and model outputs
 # -----------------------------
-data/processed/
 data/tmp/
 models/
 outputs/
