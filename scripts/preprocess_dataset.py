@@ -24,6 +24,7 @@ def fix_known_fda_truncations(text: str) -> str:
     t = str(text)
 
     # ---- Known truncation/missing-letter glitches ----
+    # "cetaminophen" -> "acetaminophen"
     t = re.sub(r"\bcetaminophen\b", "acetaminophen", t, flags=re.IGNORECASE)
     t = re.sub(r"\bcetamino\b", "acetaminophen", t, flags=re.IGNORECASE)
 
@@ -170,7 +171,7 @@ def clean_side_effects_text(text: str, max_items: int = 120) -> str:
 
 
 # -------------------------
-# Strong dedupe / caps (warnings)
+# Strong dedupe / caps (warnings + long text)
 # -------------------------
 
 def _normalize_for_dupe(s: str) -> str:
@@ -228,7 +229,7 @@ def _near_duplicate(a: str, b: str, threshold: float = 0.92) -> bool:
     return SequenceMatcher(None, na, nb).ratio() >= threshold
 
 
-# ✅ unit split + unit dedupe
+# unit split + unit dedupe (OTC starter phrases)
 _UNIT_STARTERS_RE = re.compile(
     r"(?i)(?<!^)(?<!\n)\s*(?=("
     r"keep out of reach of children"
@@ -309,6 +310,7 @@ def collapse_duplicate_blocks(text: str) -> str:
 
     text2 = "\n\n".join(out_blocks).strip()
 
+    # A + A detector
     norm = _normalize_for_dupe(text2)
     if len(norm) >= 320:
         mid = len(norm) // 2
@@ -396,15 +398,16 @@ def cap_sections(formatted: str, max_chars: int = 1200) -> str:
     return _hard_cap(out, max_chars)
 
 
-# ✅ NEW: remove near-duplicate SECTION BODIES across headings
 def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> str:
     """
     Removes sections whose BODY is a near-duplicate of another section body.
     Keeps the longest version when duplicates exist.
 
-    Useful for cases like:
-      Warnings: ... (same text)
-      Overdosage: ... (same text again)
+    Upgrade:
+    - Full similarity (ratio)
+    - Subsumption similarity (shorter contained in longer)
+    - OVERLAP/COVERAGE similarity for truncated fragments (like leucovorin calcium)
+      -> especially for (Warnings <-> Overdosage)
     """
     if not formatted:
         return ""
@@ -419,6 +422,86 @@ def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> st
         title, body = b.split(":\n", 1)
         parsed.append((title.strip(), body.strip()))
 
+    def _subsumption_ratio(a: str, b: str) -> float:
+        na = _normalize_for_dupe(a)
+        nb = _normalize_for_dupe(b)
+        if not na or not nb:
+            return 0.0
+
+        short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
+        if len(short) < 80:
+            return 0.0
+
+        sm = SequenceMatcher(None, short, long)
+        matched = sum(bl.size for bl in sm.get_matching_blocks())
+        return matched / max(1, len(short))
+
+    def _overlap_coverage(a: str, b: str) -> float:
+        """
+        Measures how much of the SHORTER string overlaps with the LONGER string,
+        even if neither fully contains the other (truncated fragments).
+
+        We compute coverage = (sum of matching blocks) / (len(shorter)).
+        This is similar to subsumption, but works better when both are fragments.
+        """
+        na = _normalize_for_dupe(a)
+        nb = _normalize_for_dupe(b)
+        if not na or not nb:
+            return 0.0
+
+        short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
+        if len(short) < 80:
+            return 0.0
+
+        sm = SequenceMatcher(None, short, long)
+        matched = sum(bl.size for bl in sm.get_matching_blocks())
+        return matched / max(1, len(short))
+
+    def _is_dup(title_a: str, body_a: str, title_b: str, body_b: str) -> bool:
+        na = _normalize_for_dupe(body_a)
+        nb = _normalize_for_dupe(body_b)
+        if not na or not nb:
+            return False
+
+        # 1) Full similarity
+        full = SequenceMatcher(None, na, nb).ratio()
+        if full >= threshold:
+            return True
+
+        # 2) Subsumption (works for "same text twice" cases)
+        sub = _subsumption_ratio(body_a, body_b)
+        if sub >= 0.78:
+            return True
+
+        # 3) Overlap/Coverage (works for truncated fragment duplicates)
+        cov = _overlap_coverage(body_a, body_b)
+
+        # Apply a LOWER coverage threshold only when headings are likely duplicates.
+        # This targets your exact leucovorin calcium case safely.
+        ta = title_a.strip().lower()
+        tb = title_b.strip().lower()
+        pair = {ta, tb}
+
+        if pair == {"warnings", "overdosage"}:
+            # These are often truncated fragments of the same paragraph.
+            # Lower threshold + require a decent longest common match.
+            na = _normalize_for_dupe(body_a)
+            nb = _normalize_for_dupe(body_b)
+
+            short, long = (na, nb) if len(na) <= len(nb) else (nb, na)
+            sm = SequenceMatcher(None, short, long)
+            longest = sm.find_longest_match(0, len(short), 0, len(long)).size
+
+            # Require at least ~60 chars of continuous overlap
+            if longest < 60:
+                return False
+
+            # Coverage threshold lowered only for this pair
+            return cov >= 0.35
+
+        # For other headings, keep stricter
+        return cov >= 0.75
+
     kept: List[Tuple[str, str]] = []
 
     for title, body in parsed:
@@ -426,22 +509,18 @@ def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> st
             kept.append((title, body))
             continue
 
-        body_norm = _normalize_for_dupe(body)
-
         dup_idx = -1
         for i, (kt, kb) in enumerate(kept):
             if not kt:
                 continue
-            kb_norm = _normalize_for_dupe(kb)
-            if not body_norm or not kb_norm:
-                continue
-            if SequenceMatcher(None, body_norm, kb_norm).ratio() >= threshold:
+            if _is_dup(title, body, kt, kb):
                 dup_idx = i
                 break
 
         if dup_idx == -1:
             kept.append((title, body))
         else:
+            # keep the longer body version
             kt, kb = kept[dup_idx]
             if len(body) > len(kb):
                 kept[dup_idx] = (title, body)
@@ -455,6 +534,9 @@ def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> st
 
     return "\n\n".join(out_blocks).strip()
 
+# -------------------------
+# openFDA heading fallback (Rx-ish labels)
+# -------------------------
 
 def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
     """
@@ -487,7 +569,7 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
     ]
 
     heading_re = re.compile(
-        r"(?i)\b(" + "|".join(re.escape(h) for h in headings) + r")\b\s*[:]?"
+        r"(?i)\b(" + "|".join(re.escape(h) for h in headings) + r")\b\s*[:]?[\s]*"
     )
 
     matches = list(heading_re.finditer(t))
@@ -511,6 +593,7 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
             best[k] = chunk
 
     def dedupe_sentences(title: str, chunk: str) -> List[str]:
+        # remove duplicated heading token at start
         chunk = re.sub(rf"(?i)^\s*{re.escape(title)}\s*:?\s*[,.\-]*\s*", "", chunk).strip()
         chunk = _cut_repeated_prefix(chunk)
 
@@ -544,18 +627,22 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
         body = " ".join(lines).strip()
         if not body:
             continue
+
         formatted_blocks.append(f"{h.title()}:\n{body}")
 
     out = "\n\n".join(formatted_blocks).strip()
-
     out = collapse_duplicate_blocks(out)
 
-    # ✅ NEW: remove duplicate bodies across headings (Warnings vs Overdosage etc.)
+    # ✅ Key fix for leucovorin calcium: remove duplicate bodies across headings
     out = drop_duplicate_section_bodies(out, threshold=0.90)
 
     out = cap_sections(out, max_chars=max_chars)
     return out
 
+
+# -------------------------
+# OTC-style sections + fallback
+# -------------------------
 
 def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
     """
@@ -567,6 +654,7 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
 
     t = fix_known_fda_truncations(text)
 
+    # Normalize whitespace / bullets
     t = t.replace("\r\n", "\n").replace("\r", "\n")
     t = t.replace("■", " ").replace("▪", " ").replace("•", " ")
     t = re.sub(r"\n+", " ", t)
@@ -590,6 +678,7 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
         for m in re.finditer(pat, t, flags=re.IGNORECASE):
             hits.append((m.start(), title))
 
+    # fallback if no OTC anchors
     if not hits:
         return clean_openfda_heading_blocks(t, max_chars=max_chars)
 
@@ -642,10 +731,9 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
         blocks.append(f"{title}:\n{formatted}")
 
     out = "\n\n".join(blocks).strip()
-
     out = collapse_duplicate_blocks(out)
 
-    # ✅ NEW: remove duplicate bodies across sections
+    # ✅ also remove duplicate bodies across OTC sections (rare but safe)
     out = drop_duplicate_section_bodies(out, threshold=0.90)
 
     out = cap_sections(out, max_chars=max_chars)
@@ -665,6 +753,8 @@ def clean_long_text(text: str, *, max_chars: int = 1200) -> str:
     t = t.replace("■", " ").replace("▪", " ").replace("•", " ")
     t = re.sub(r"\n+", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
+
+    # repeat killer helps indications/dosage/contra too
     t = collapse_duplicate_blocks(t)
     return _hard_cap(t, max_chars)
 
@@ -708,7 +798,7 @@ def main() -> None:
         if col in df.columns:
             df[col] = df[col].apply(lambda x: clean_long_text(x, max_chars=1200))
 
-    # ✅ Warnings
+    # Warnings
     if "warnings" in df.columns:
         df["warnings"] = df["warnings"].apply(
             lambda x: clean_fda_warnings_section_level(x, max_chars=1200)
