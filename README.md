@@ -1,4 +1,5 @@
 # 🧠 MediAssist Bot
+
 ### 💊 AI-Based Medication Assistant for Chronic Diseases
 
 ---
@@ -8,6 +9,7 @@
 **MediAssist Bot** is an academic **AI-based medication understanding system** designed to assist patients—especially those with **chronic diseases**—in understanding **doctor prescriptions**.
 
 The system focuses on:
+
 - Reading **handwritten or printed prescriptions**
 - Extracting **medicine names and dosage information**
 - Providing **safe, non-diagnostic explanations** using trusted medical data
@@ -28,26 +30,28 @@ Existing online platforms are often unreliable, not user-friendly, and lack prop
 ## 💡 Project Idea
 
 An AI-powered assistant that helps patients understand:
-- Medicines prescribed by doctors  
-- Dosage patterns and instructions  
-- General purpose, warnings, side effects, and contraindications  
+
+- Medicines prescribed by doctors
+- Dosage patterns and instructions
+- General purpose, warnings, side effects, and contraindications
 
 The system uses:
-- **OCR** for prescription text extraction  
-- **NLP & Transformer models** for medication entity extraction  
-- **Retrieval-Augmented Generation (RAG)** for grounded explanations  
-- A **chat interface** for user interaction  
+
+- **OCR** for prescription text extraction
+- **NLP & Transformer models** for medication entity extraction
+- **Retrieval-Augmented Generation (RAG)** for grounded explanations
+- A **chat interface** for user interaction
 
 ---
 
 ## 🎯 Target Chronic Diseases
 
-- Diabetes  
-- Hypertension  
-- Asthma  
-- Heart Disease  
-- Arthritis  
-- Migraine  
+- Diabetes
+- Hypertension
+- Asthma
+- Heart Disease
+- Arthritis
+- Migraine
 
 > These diseases require long-term medication usage and are common globally, with better public dataset availability.
 
@@ -55,12 +59,12 @@ The system uses:
 
 ## 👥 Target Audience
 
-- Patients with chronic diseases  
-- Elderly patients  
-- Caregivers  
-- AI students  
-- Medical students  
-- Pharmacy students  
+- Patients with chronic diseases
+- Elderly patients
+- Caregivers
+- AI students
+- Medical students
+- Pharmacy students
 
 ---
 
@@ -145,18 +149,21 @@ MediAssistBot/
 ## ⚙️ Installation
 
 ### 1️⃣ Clone the Repository
+
 ```bash
 git clone https://github.com/YasiruChamithLansakara/MediAssist-Bot.git
 cd MediAssistBot
 ```
 
 ### 2️⃣ Create Virtual Environment
+
 ```bash
 python -m venv venv
 source venv/bin/activate     # On Windows: venv\Scripts\activate
 ```
 
 ### 3️⃣ Install Requirements
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -166,18 +173,22 @@ pip install -r requirements.txt
 ## 🧠 How It Works
 
 ### 1️⃣ OCR Processing
+
 - Extracts text from prescription images
 - Handles noisy and handwritten text
 
 ### 2️⃣ Medication Extraction (NLP)
+
 - Identifies medicine names and dosage
 - Uses transformer-based models
 
 ### 3️⃣ Knowledge Retrieval + LLM
+
 - Retrieves verified drug information
 - Generates grounded explanations with disclaimers
 
 ### 4️⃣ Chat Interface
+
 - Allows follow-up questions
 - Maintains conversation context
 
@@ -185,16 +196,16 @@ pip install -r requirements.txt
 
 ## 📊 Datasets Used
 
-| Data Type | Source |
-|---------|--------|
-| Disease data | Kaggle |
-| Medicine name | openFDA |
-| Brand / Generic names | openFDA |
-| Drug class | DrugBank |
-| Purpose & indications | openFDA, DrugBank |
-| Dosage patterns | openFDA, MedDRA |
-| Side effects & warnings | openFDA, MedDRA |
-| Contraindications | DrugBank, openFDA |
+| Data Type                 | Source                           |
+| ------------------------- | -------------------------------- |
+| Disease data              | Kaggle                           |
+| Medicine name             | openFDA                          |
+| Brand / Generic names     | openFDA                          |
+| Drug class                | DrugBank                         |
+| Purpose & indications     | openFDA, DrugBank                |
+| Dosage patterns           | openFDA, MedDRA                  |
+| Side effects & warnings   | openFDA, MedDRA                  |
+| Contraindications         | DrugBank, openFDA                |
 | Handwritten prescriptions | Kaggle / HF (synthetic & public) |
 
 > All datasets are **public, trusted, and ethically approved**.
@@ -203,17 +214,18 @@ pip install -r requirements.txt
 
 ## 🛠️ Tools & Technologies
 
-- **Programming:** Python, NumPy, Pandas, matplotlib, seaborn, scikit-learn 
-- **OCR:** DeepseekOCR  
-- **NLP / Transformers:** BioBERT  
-- **Vector Database:** FAISS  
-- **Knowledge Retrieval:** RAG (Retrieval-Augmented Generation)  
-- **Backend:** FastAPI  
-- **UI:** Streamlit  
+- **Programming:** Python, NumPy, Pandas, matplotlib, seaborn, scikit-learn
+- **OCR:** DeepseekOCR
+- **NLP / Transformers:** BioBERT
+- **Vector Database:** FAISS
+- **Knowledge Retrieval:** RAG (Retrieval-Augmented Generation)
+- **Backend:** FastAPI
+- **UI:** Streamlit
 
 ---
 
 ## 🧪 Example Usage
+
 ```bash
 # Run OCR on a prescription
 python scripts/run_ocr.py
@@ -240,14 +252,14 @@ streamlit run webapp/app.py
 
 ## ⏳ Project Timeline (46 Days)
 
-| Phase | Activity | Duration |
-|---|---|---|
-| Phase 1 | Literature review & dataset preparation | 7 days |
-| Phase 2 | OCR module development | 8 days |
-| Phase 3 | NLP extraction & drug mapping | 10 days |
-| Phase 4 | LLM & chat integration | 10 days |
-| Phase 5 | Testing & evaluation | 7 days |
-| Phase 6 | Documentation & presentation | 3 days |
+| Phase   | Activity                                | Duration |
+| ------- | --------------------------------------- | -------- |
+| Phase 1 | Literature review & dataset preparation | 7 days   |
+| Phase 2 | OCR module development                  | 8 days   |
+| Phase 3 | NLP extraction & drug mapping           | 10 days  |
+| Phase 4 | LLM & chat integration                  | 10 days  |
+| Phase 5 | Testing & evaluation                    | 7 days   |
+| Phase 6 | Documentation & presentation            | 3 days   |
 
 ---
 
@@ -269,7 +281,8 @@ This project is released under the **MIT License**.
 
 ---
 
-## 🧬 Developed by  
+## 🧬 Developed by
+
 **Team MediAssist ❤️**
 
 © 2026 Team MediAssist. All Rights Reserved.
