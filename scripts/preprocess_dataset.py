@@ -3,25 +3,29 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from difflib import SequenceMatcher
 
 import pandas as pd
 
 
-# -------------------------
+# =============================================================================
 # Cleaning helpers
-# -------------------------
+# =============================================================================
 
 def fix_known_fda_truncations(text: str) -> str:
     """
     Fix known openFDA truncation + encoding (mojibake) artifacts BEFORE any dedupe/splitting.
-    This must run first for warnings/indications/etc.
+    Must run first for warnings/indications/etc.
     """
     if not text:
         return ""
 
     t = str(text)
+
+    # Remove Unicode replacement character introduced by encoding_errors="replace"
+    # (DO NOT remove normal spaces)
+    t = t.replace("\ufffd", "")
 
     # ---- Known truncation/missing-letter glitches ----
     t = re.sub(r"\bcetaminophen\b", "acetaminophen", t, flags=re.IGNORECASE)
@@ -55,6 +59,7 @@ def fix_known_fda_truncations(text: str) -> str:
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r"\s+\n", "\n", t)
     t = re.sub(r"\n\s+", "\n", t)
+
     return t.strip()
 
 
@@ -126,6 +131,10 @@ def trim_brand_names(raw: str, max_items: int = 20) -> str:
 
 
 def clean_side_effects_text(text: str, max_items: int = 120) -> str:
+    """
+    Side effects are usually comma-separated lists.
+    Keep this light: normalize separators + dedupe items + cap item count.
+    """
     if not text:
         return ""
 
@@ -151,12 +160,12 @@ def clean_side_effects_text(text: str, max_items: int = 120) -> str:
     return ", ".join(out)
 
 
-# -------------------------
-# Strong dedupe / caps (warnings + long text)
-# -------------------------
+# =============================================================================
+# Strong dedupe / caps core
+# =============================================================================
 
 def _normalize_for_dupe(s: str) -> str:
-    s = s.lower()
+    s = (s or "").lower()
     s = re.sub(r"\s+", " ", s).strip()
     s = re.sub(r"[^a-z0-9 ]+", "", s)
     return s
@@ -224,21 +233,138 @@ def _cut_repeated_prefix(raw: str) -> str:
     return s
 
 
-# ✅ FIXED: de-dupe repeated WARNING/WARNINGS headline blocks (diclofenac / ferrous sulfate)
+def _has_repeated_window(text: str, window_words: int = 18) -> bool:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    if len(words) < window_words * 2:
+        return False
+    seen = set()
+    for i in range(0, len(words) - window_words):
+        chunk = " ".join(words[i:i + window_words])
+        if chunk in seen:
+            return True
+        seen.add(chunk)
+    return False
+
+
+def _cut_at_first_repeated_window(text: str, window_words: int = 18, min_keep: int = 180) -> str:
+    """
+    Cut at the start of the *second* occurrence of a repeated 18-word window.
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+
+    low = re.sub(r"\s+", " ", s.lower()).strip()
+    words = re.findall(r"[a-z0-9]+", low)
+    if len(words) < window_words * 2:
+        return s
+
+    seen: Dict[str, int] = {}
+    repeat_phrase = None
+
+    for i in range(0, len(words) - window_words):
+        w = " ".join(words[i:i + window_words])
+        if w in seen:
+            repeat_phrase = w
+            break
+        seen[w] = i
+
+    if not repeat_phrase:
+        return s
+
+    matches = list(re.finditer(re.escape(repeat_phrase), low))
+    if len(matches) < 2:
+        return s
+
+    second_start = matches[1].start()
+    if second_start <= 0:
+        return s
+
+    cut = s[:second_start].strip(" .")
+    return cut if len(cut) >= min_keep else s
+
+
+# =============================================================================
+# NEW: repeated-window deduper that preserves most punctuation
+# =============================================================================
+
+def _dedupe_repeated_word_windows_preserve_punct(text: str, window_words: int = 18, max_passes: int = 4) -> str:
+    """
+    Final safety net for 'repeated long-block' rows:
+    - Tokenizes into [word] and [punct] tokens
+    - Removes later repeated 18-word windows by skipping the duplicate window region
+    Keeps most punctuation (not perfect spacing, but stays readable enough).
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+
+    toks = re.findall(r"[A-Za-z0-9]+|[^A-Za-z0-9\s]+", s)
+
+    word_ti: List[int] = []
+    words: List[str] = []
+    for ti, tok in enumerate(toks):
+        if re.fullmatch(r"[A-Za-z0-9]+", tok):
+            word_ti.append(ti)
+            words.append(tok.lower())
+
+    if len(words) < window_words * 2:
+        return s
+
+    rebuilt = s
+    for _ in range(max_passes):
+        seen: set[str] = set()
+        out_toks: List[str] = []
+        i = 0
+        changed = False
+
+        while i < len(words):
+            if i <= len(words) - window_words:
+                key = " ".join(words[i:i + window_words])
+                if key in seen:
+                    changed = True
+                    i += window_words
+                    continue
+                seen.add(key)
+
+            ti = word_ti[i]
+            ti_next = word_ti[i + 1] if i + 1 < len(word_ti) else len(toks)
+            out_toks.extend(toks[ti:ti_next])
+            i += 1
+
+        rebuilt = " ".join(out_toks)
+        rebuilt = re.sub(r"\s+([,.;:!?])", r"\1", rebuilt)
+        rebuilt = re.sub(r"\s+([\)\]\}])", r"\1", rebuilt)
+        rebuilt = re.sub(r"([\(\[\{])\s+", r"\1", rebuilt)
+        rebuilt = re.sub(r"\s{2,}", " ", rebuilt).strip()
+
+        if not changed:
+            return rebuilt
+
+        toks = re.findall(r"[A-Za-z0-9]+|[^A-Za-z0-9\s]+", rebuilt)
+        word_ti = []
+        words = []
+        for ti, tok in enumerate(toks):
+            if re.fullmatch(r"[A-Za-z0-9]+", tok):
+                word_ti.append(ti)
+                words.append(tok.lower())
+
+        if len(words) < window_words * 2:
+            return rebuilt
+
+    return rebuilt
+
+
+# =============================================================================
+# WARNING/WARNINGS headline dedupe (keeps warnings stable and helps leaks)
+# =============================================================================
+
 _WARNING_HEADLINE_RE = re.compile(
     r"(?i)(?<!^)\s+(?=(?:boxed warning\b|warning\s*:|warnings\s*:))"
 )
 
 
 def dedupe_warning_headlines(text: str) -> str:
-    """
-    Splits at WARNING:/WARNINGS:/BOXED WARNING boundaries and removes near-duplicate
-    headline blocks (even with small edits or truncation).
-
-    This prevents 'repeated long-block' flags for cases like:
-    - diclofenac sodium topical (two near-identical WARNING lines)
-    - ferrous sulfate (WARNINGS paragraph repeated with tiny wording changes)
-    """
     if not text:
         return ""
 
@@ -246,36 +372,25 @@ def dedupe_warning_headlines(text: str) -> str:
     if not s:
         return ""
 
-    # Insert line breaks before WARNING/WARNINGS/BOXED WARNING tokens
     s2 = _WARNING_HEADLINE_RE.sub("\n", s)
-
     units = [u.strip() for u in re.split(r"\n+", s2) if u.strip()]
     if len(units) <= 1:
         return s.strip()
 
     out: List[str] = []
     for u in units:
-        ul = u.strip().lower()
-
-        # Is this a headline-ish unit?
+        ul = u.lower().strip()
         is_headline = ul.startswith("warning:") or ul.startswith("warnings:") or ul.startswith("boxed warning")
         if not is_headline:
             out.append(u)
             continue
 
-        # Compare against last few headline units
         dup = False
         for prev in out[-6:]:
             pl = prev.lower().strip()
             if not (pl.startswith("warning:") or pl.startswith("warnings:") or pl.startswith("boxed warning")):
                 continue
-
-            # Stronger duplicate detection for headlines:
-            # - ratio OR coverage
-            if _near_duplicate(u, prev, threshold=0.88):
-                dup = True
-                break
-            if _coverage(u, prev) >= 0.55:  # truncation-friendly
+            if _near_duplicate(u, prev, threshold=0.88) or _coverage(u, prev) >= 0.55:
                 dup = True
                 break
 
@@ -285,7 +400,10 @@ def dedupe_warning_headlines(text: str) -> str:
     return "\n".join(out).strip()
 
 
-# unit split + unit dedupe (OTC starter phrases)
+# =============================================================================
+# Unit split + unit dedupe (generic)
+# =============================================================================
+
 _UNIT_STARTERS_RE = re.compile(
     r"(?i)(?<!^)(?<!\n)\s*(?=(?:"
     r"keep out of reach of children"
@@ -308,10 +426,6 @@ _UNIT_STARTERS_RE = re.compile(
 
 
 def _split_and_dedupe_units(text: str) -> str:
-    """
-    Inserts line breaks before common starters, splits into units,
-    and removes repeated units (exact or near-duplicates).
-    """
     if not text:
         return ""
 
@@ -331,23 +445,18 @@ def _split_and_dedupe_units(text: str) -> str:
         key = _normalize_for_dupe(u)
         if not key:
             continue
-
         if key in seen:
             continue
 
-        # ✅ stronger for WARNING/WARNINGS units (ferrous sulfate style)
         ul = u.lower().strip()
         if ul.startswith("warning") or ul.startswith("warnings") or ul.startswith("boxed warning"):
-            # Use ratio + coverage so small edits still get dropped
-            if out:
-                for prev in out[-6:]:
-                    if _near_duplicate(u, prev, threshold=0.86) or _coverage(u, prev) >= 0.55:
-                        key = None
-                        break
-            if key is None:
+            for prev in out[-6:]:
+                if _near_duplicate(u, prev, threshold=0.86) or _coverage(u, prev) >= 0.55:
+                    key = ""
+                    break
+            if not key:
                 continue
 
-        # General near-dup check
         if out and any(_near_duplicate(u, prev) for prev in out[-4:]):
             continue
 
@@ -357,10 +466,147 @@ def _split_and_dedupe_units(text: str) -> str:
     return "\n".join(out).strip()
 
 
+# =============================================================================
+# Aggressive sentence/unit dedupe for long text
+# =============================================================================
+
+_DIRECTIONS_SPLIT_RE = re.compile(r"\bDirections\b\s*:?", flags=re.IGNORECASE)
+_SUBSECTION_MARK_RE = re.compile(r"\(\s*\d+(?:\.\d+)*\s*\)")  # ( 1.1 ) style
+_SECTION_NUM_RE = re.compile(r"(?<!\w)(\d+(?:\.\d+)*)(?=\s+[A-Z])")  # 1.1 Title
+
+# Long-text noise removers
+_JUNK_TEXT_RE = re.compile(r"(?i)\bclick (?:or tap )?here to enter text\.?\b")
+_SECTION_REF_RE = re.compile(r"\(\s*\d+(?:\.\d+)*\s*\)")  # (2) (2.1) etc
+_BRACKET_SEE_RE = re.compile(r"\[\s*see [^\]]+\]", flags=re.IGNORECASE)  # [see ...]
+_MULTI_SPACE_RE = re.compile(r"\s{2,}")
+
+
+def _dedupe_sentences_fallback(text: str) -> str:
+    """
+    Aggressive dedupe for FDA-ish text that often has weak punctuation.
+    Keeps shorter useful lines too (fixes repeating short statements).
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+
+    s = _DIRECTIONS_SPLIT_RE.sub("\nDirections:\n", s)
+    s = _SUBSECTION_MARK_RE.sub(lambda m: "\n" + m.group(0) + " ", s)
+    s = _SECTION_NUM_RE.sub(lambda m: "\n" + m.group(1), s)
+
+    parts = re.split(r"(?<=[.!?])\s+|\n+", s)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    out: List[str] = []
+    seen: set[str] = set()
+
+    for p in parts:
+        words = re.findall(r"[A-Za-z0-9]+", p)
+        if len(p) < 18 and len(words) < 4:
+            continue
+
+        k = _normalize_for_dupe(p)
+        if not k or k in seen:
+            continue
+
+        recent = out[-10:]
+        if any(_near_duplicate(p, prev, threshold=0.88) for prev in recent):
+            continue
+        if any(_coverage(p, prev) >= 0.70 for prev in recent):
+            continue
+
+        seen.add(k)
+        out.append(p)
+
+    rebuilt = " ".join(out).strip()
+    rebuilt = re.sub(r"\s+", " ", rebuilt).strip()
+    return rebuilt
+
+
+# =============================================================================
+# Heading-block dedupe (ALL CAPS + Title Case) + numeric prefix support
+# =============================================================================
+
+def _dedupe_heading_blocks_allcaps(text: str, headings_caps: List[str]) -> str:
+    t = (text or "").strip()
+    if not t:
+        return ""
+
+    heading_re = re.compile(
+        r"(?:(?<=^)|(?<=\n)|(?<=[.!?])\s+)\s*(?:\d+(?:\.\d+)*\s+)?(?P<h>"
+        + "|".join(re.escape(h) for h in headings_caps)
+        + r")\b\s*:?\s*"
+    )
+
+    matches = list(heading_re.finditer(t))
+    if not matches:
+        return t
+
+    blocks: List[Tuple[str, str, int]] = []
+    for i, m in enumerate(matches):
+        h = m.group("h").strip()
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(t)
+        chunk = t[start:end].strip()
+        blocks.append((h, chunk, start))
+
+    best: Dict[str, Tuple[str, int]] = {}
+    for h, chunk, start in blocks:
+        key = h.upper()
+        prev = best.get(key)
+        if prev is None or len(chunk) > len(prev[0]):
+            best[key] = (chunk, start)
+
+    ordered = sorted(best.items(), key=lambda kv: kv[1][1])
+    out_chunks = [kv[1][0] for kv in ordered]
+    return "\n\n".join(out_chunks).strip()
+
+
+def _dedupe_heading_blocks_case_insensitive(text: str, headings: List[str]) -> str:
+    t = (text or "").strip()
+    if not t:
+        return ""
+
+    heading_re = re.compile(
+        r"(?:(?<=^)|(?<=\n)|(?<=[.!?])\s+)\s*(?:\d+(?:\.\d+)*\s+)?(?P<h>"
+        + "|".join(re.escape(h) for h in headings)
+        + r")\b\s*:?\s*",
+        flags=re.IGNORECASE,
+    )
+
+    matches = list(heading_re.finditer(t))
+    if not matches:
+        return t
+
+    blocks: List[Tuple[str, str, int]] = []
+    for i, m in enumerate(matches):
+        h = m.group("h").strip()
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(t)
+        chunk = t[start:end].strip()
+        blocks.append((h, chunk, start))
+
+    best: Dict[str, Tuple[str, int]] = {}
+    for h, chunk, start in blocks:
+        key = h.lower()
+        prev = best.get(key)
+        if prev is None or len(chunk) > len(prev[0]):
+            best[key] = (chunk, start)
+
+    ordered = sorted(best.items(), key=lambda kv: kv[1][1])
+    out_chunks = [kv[1][0] for kv in ordered]
+    return "\n\n".join(out_chunks).strip()
+
+
+# =============================================================================
+# Core repeat killer used everywhere
+# =============================================================================
+
 def collapse_duplicate_blocks(text: str) -> str:
-    """
-    Final pass to catch remaining repeated long-block cases.
-    """
     if not text:
         return ""
 
@@ -370,7 +616,6 @@ def collapse_duplicate_blocks(text: str) -> str:
 
     raw = _cut_repeated_prefix(raw)
 
-    # block-level dedupe
     blocks = [b.strip() for b in re.split(r"\n{2,}", raw) if b.strip()]
     out_blocks: List[str] = []
     seen: set[str] = set()
@@ -396,14 +641,30 @@ def collapse_duplicate_blocks(text: str) -> str:
             if len(half) > 120:
                 text2 = half
 
-    # unit-based dedupe + headline dedupe
     text2 = _split_and_dedupe_units(text2)
     text2 = dedupe_warning_headlines(text2)
-
-    # final repeated-prefix cut again
     text2 = _cut_repeated_prefix(text2)
 
+    if _has_repeated_window(text2, window_words=18):
+        text2 = _dedupe_sentences_fallback(text2)
+
+    if _has_repeated_window(text2, window_words=18):
+        text2 = _cut_at_first_repeated_window(text2, window_words=18, min_keep=180)
+
     return text2.strip()
+
+
+# =============================================================================
+# Warnings formatting & caps (keep stable clean warnings)
+# =============================================================================
+
+def _hard_cap_section_body(body: str, cap: int) -> str:
+    body = (body or "").strip()
+    if len(body) <= cap:
+        return body
+    if cap <= 1:
+        return "…"
+    return body[: cap - 1].rstrip() + "…"
 
 
 def cap_sections(formatted: str, max_chars: int = 1200) -> str:
@@ -438,7 +699,7 @@ def cap_sections(formatted: str, max_chars: int = 1200) -> str:
 
     for b in blocks:
         if ":\n" not in b:
-            new_blocks.append(_hard_cap(b, 420))
+            new_blocks.append(_hard_cap_section_body(b, 420))
             continue
 
         title, body = b.split(":\n", 1)
@@ -457,9 +718,9 @@ def cap_sections(formatted: str, max_chars: int = 1200) -> str:
                 total += len(ln) + 1
             body2 = "\n".join(kept).strip()
             if not body2:
-                body2 = _hard_cap(body, cap)
+                body2 = _hard_cap_section_body(body, cap)
         else:
-            body2 = _hard_cap(body, cap)
+            body2 = _hard_cap_section_body(body, cap)
 
         new_blocks.append(f"{title}:\n{body2}")
 
@@ -468,16 +729,12 @@ def cap_sections(formatted: str, max_chars: int = 1200) -> str:
 
 
 def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> str:
-    """
-    Removes sections whose BODY is a near-duplicate of another section body.
-    Uses ratio + coverage to handle truncated duplicates.
-    """
     if not formatted:
         return ""
 
     blocks = [b.strip() for b in re.split(r"\n{2,}", formatted.strip()) if b.strip()]
-
     parsed: List[Tuple[str, str]] = []
+
     for b in blocks:
         if ":\n" not in b:
             parsed.append(("", b.strip()))
@@ -506,12 +763,10 @@ def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> st
                 dup_idx = i
                 break
 
-            # truncation-friendly
             if _coverage(body, kb) >= 0.70:
                 dup_idx = i
                 break
 
-            # special: Warnings vs Overdosage fragment duplicates
             pair = {title.lower(), kt.lower()}
             if pair == {"warnings", "overdosage"} and _coverage(body, kb) >= 0.40:
                 dup_idx = i
@@ -534,18 +789,7 @@ def drop_duplicate_section_bodies(formatted: str, threshold: float = 0.90) -> st
     return "\n\n".join(out_blocks).strip()
 
 
-# -------------------------
-# openFDA heading fallback (Rx-ish labels)
-# -------------------------
-
 def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
-    """
-    Fallback cleaner for warnings when OTC anchors aren't found.
-
-    IMPORTANT:
-    Only treat headings as headings when they look like headings (ALL CAPS at boundaries),
-    so we don't mistake 'accidental overdosage' as the OVERDOSAGE heading.
-    """
     if not text:
         return ""
 
@@ -555,7 +799,6 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
     if not t:
         return ""
 
-    # ✅ also de-dupe WARNING/WARNINGS headline blocks early (diclofenac/ferrous)
     t = dedupe_warning_headlines(t)
 
     headings_caps = [
@@ -573,8 +816,10 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
         "DOSAGE AND ADMINISTRATION",
     ]
 
+    t = _dedupe_heading_blocks_allcaps(t, headings_caps)
+
     heading_re = re.compile(
-        r"(?:(?<=^)|(?<=\n)|(?<=[.!?])\s+)\s*(?P<h>"
+        r"(?:(?<=^)|(?<=\n)|(?<=[.!?])\s+)\s*(?:\d+(?:\.\d+)*\s+)?(?P<h>"
         + "|".join(re.escape(h) for h in headings_caps)
         + r")\b\s*:?\s*"
     )
@@ -593,41 +838,11 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
         chunk = t[start:end].strip()
         blocks.append((h, chunk))
 
-    best: dict[str, str] = {}
+    best: Dict[str, str] = {}
     for h, chunk in blocks:
         key = h.upper()
         if len(chunk) > len(best.get(key, "")):
             best[key] = chunk
-
-    def dedupe_sentences(heading: str, chunk: str) -> List[str]:
-        chunk = re.sub(
-            rf"^\s*{re.escape(heading)}\s*:?\s*[,.\-]*\s*",
-            "",
-            chunk,
-            flags=0,
-        ).strip()
-
-        chunk = _cut_repeated_prefix(chunk)
-
-        parts = re.split(r"(?<=[.!?])\s+|\n+", chunk)
-        out: List[str] = []
-        seen: set[str] = set()
-
-        for p in parts:
-            p = p.strip(" .")
-            if len(p) < 20:
-                continue
-
-            key = _normalize_for_dupe(p)
-            if not key or key in seen:
-                continue
-
-            if out and any(_near_duplicate(p, prev) for prev in out[-3:]):
-                continue
-
-            seen.add(key)
-            out.append(p + ".")
-        return out
 
     formatted_blocks: List[str] = []
     for h in headings_caps:
@@ -635,12 +850,19 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
         if not chunk:
             continue
 
-        lines = dedupe_sentences(h, chunk)
-        body = " ".join(lines).strip()
-        if not body:
+        chunk2 = re.sub(
+            rf"^\s*(?:\d+(?:\.\d+)*\s+)?{re.escape(h)}\s*:?\s*[,.\-]*\s*",
+            "",
+            chunk,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        chunk2 = collapse_duplicate_blocks(chunk2)
+        chunk2 = re.sub(r"\s+", " ", chunk2).strip()
+        if not chunk2:
             continue
 
-        formatted_blocks.append(f"{h.title()}:\n{body}")
+        formatted_blocks.append(f"{h.title()}:\n{chunk2}")
 
     out = "\n\n".join(formatted_blocks).strip()
     out = collapse_duplicate_blocks(out)
@@ -649,21 +871,12 @@ def clean_openfda_heading_blocks(text: str, max_chars: int = 1200) -> str:
     return out
 
 
-# -------------------------
-# OTC-style sections + fallback
-# -------------------------
-
 def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
-    """
-    OTC-style FDA warnings cleaner with SECTION-LEVEL formatting.
-    If OTC anchors aren't found, falls back to openFDA heading-block cleaner.
-    """
     if not text:
         return ""
 
     t = fix_known_fda_truncations(text)
 
-    # Normalize whitespace / bullets
     t = t.replace("\r\n", "\n").replace("\r", "\n")
     t = t.replace("■", " ").replace("▪", " ").replace("•", " ")
     t = re.sub(r"\n+", " ", t)
@@ -672,7 +885,6 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
     if not t:
         return ""
 
-    # ✅ pre-dedupe WARNING/WARNINGS headline blocks before section logic
     t = dedupe_warning_headlines(t)
 
     sections = [
@@ -703,25 +915,26 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
             extracted[title] = chunk
 
     def dedupe_sentences(title: str, chunk: str) -> List[str]:
-        chunk = re.sub(rf"(?i)^\s*{re.escape(title)}\s*:?\s*", "", chunk).strip()
+        chunk = re.sub(rf"^\s*{re.escape(title)}\s*:?\s*", "", chunk, flags=re.IGNORECASE).strip()
         chunk = _cut_repeated_prefix(chunk)
-
         parts = re.split(r"(?<=[.!?])\s+", chunk)
-        seen = set()
-        out: List[str] = []
 
+        out: List[str] = []
+        seen: set[str] = set()
         for p in parts:
             p = p.strip(" .")
-            if len(p) < 20:
+            words = re.findall(r"[A-Za-z0-9]+", p)
+            if len(p) < 18 and len(words) < 4:
                 continue
 
             k = _normalize_for_dupe(p)
             if not k or k in seen:
                 continue
-
-            if out and any(_near_duplicate(p, prev) for prev in out[-3:]):
+            if out and (
+                any(_near_duplicate(p, prev) for prev in out[-4:])
+                or any(_coverage(p, prev) >= 0.70 for prev in out[-4:])
+            ):
                 continue
-
             seen.add(k)
             out.append(p)
         return out
@@ -733,7 +946,6 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
             continue
 
         lines = dedupe_sentences(title, content)
-
         if title.startswith("Stop use"):
             formatted = "\n".join(f"• {l}" for l in lines)
         else:
@@ -748,10 +960,46 @@ def clean_fda_warnings_section_level(text: str, max_chars: int = 1200) -> str:
     return out
 
 
-def clean_long_text(text: str, *, max_chars: int = 1200) -> str:
+# =============================================================================
+# Long text cleaning (indications / dosage / contraindications)
+# =============================================================================
+
+_LONGTEXT_HEADINGS_CAPS = [
+    "INDICATIONS",
+    "INDICATIONS AND USAGE",
+    "DOSAGE AND ADMINISTRATION",
+    "CONTRAINDICATIONS",
+    "WARNINGS",
+    "WARNINGS AND PRECAUTIONS",
+    "PRECAUTIONS",
+    "ADVERSE REACTIONS",
+    "CLINICAL PHARMACOLOGY",
+    "DESCRIPTION",
+    "HOW SUPPLIED",
+]
+
+_LONGTEXT_HEADINGS_TITLECASE = [
+    "Indications",
+    "Indications and Usage",
+    "Dosage and Administration",
+    "Contraindications",
+    "Warnings",
+    "Warnings and Precautions",
+    "Precautions",
+    "Adverse Reactions",
+    "Clinical Pharmacology",
+    "Description",
+    "How Supplied",
+]
+
+
+def _clean_long_text_generic(text: str, *, max_chars: int = 1200) -> str:
     """
-    For cleaned dataset: light cap + whitespace normalize,
-    plus truncation/encoding fix + repeat killer.
+    Strong against:
+    - repeated full blocks (A then A again)
+    - repeated heading blocks inside the same cell
+    - low-punctuation FDA label text
+    While avoiding wiping short 'see ...' cells (prevents non-empty drop).
     """
     if not text:
         return ""
@@ -759,28 +1007,74 @@ def clean_long_text(text: str, *, max_chars: int = 1200) -> str:
     t = fix_known_fda_truncations(text)
     t = t.replace("\r\n", "\n").replace("\r", "\n")
     t = t.replace("■", " ").replace("▪", " ").replace("•", " ")
-    t = re.sub(r"\n+", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    if not t:
+        return ""
 
-    # ✅ helpful for long text too (sometimes WARNINGS text leaks into other cols)
+    # Remove common template/junk strings
+    t = _JUNK_TEXT_RE.sub(" ", t)
+
+    # IMPORTANT: Only strip refs if they appear repeatedly (prevents emptying short cells)
+    if len(_SECTION_REF_RE.findall(t)) >= 3:
+        t = _SECTION_REF_RE.sub(" ", t)
+    if len(_BRACKET_SEE_RE.findall(t)) >= 2:
+        t = _BRACKET_SEE_RE.sub(" ", t)
+
+    t = _MULTI_SPACE_RE.sub(" ", t).strip()
+
+    # Remove repeated heading blocks first (ALLCAPS + TitleCase), now supports numeric prefixes
+    t = _dedupe_heading_blocks_allcaps(t, _LONGTEXT_HEADINGS_CAPS)
+    t = _dedupe_heading_blocks_case_insensitive(t, _LONGTEXT_HEADINGS_TITLECASE)
+
+    # If WARNING/WARNINGS headlines leaked in, dedupe them
     t = dedupe_warning_headlines(t)
 
+    # Strong repeat killer
     t = collapse_duplicate_blocks(t)
+
+    # Always run sentence dedupe for medium/long text (kills repeated short statements too)
+    if len(t) >= 220:
+        t = _dedupe_sentences_fallback(t)
+
+    # Final safety net for your remaining repeated long-block rows
+    if _has_repeated_window(t, window_words=18):
+        t = _dedupe_repeated_word_windows_preserve_punct(t, window_words=18, max_passes=4)
+
+    # If STILL repeated, hard cut at second occurrence (rare)
+    if _has_repeated_window(t, window_words=18):
+        t = _cut_at_first_repeated_window(t, window_words=18, min_keep=180)
+
+    # Flatten for display
+    t = re.sub(r"\s+", " ", t).strip()
+
     return _hard_cap(t, max_chars)
 
 
-# -------------------------
+def clean_indications_text(text: str, *, max_chars: int = 1200) -> str:
+    return _clean_long_text_generic(text, max_chars=max_chars)
+
+
+def clean_dosage_text(text: str, *, max_chars: int = 1200) -> str:
+    return _clean_long_text_generic(text, max_chars=max_chars)
+
+
+def clean_contraindications_text(text: str, *, max_chars: int = 1200) -> str:
+    return _clean_long_text_generic(text, max_chars=max_chars)
+
+
+# =============================================================================
 # Main
-# -------------------------
+# =============================================================================
 
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
 
+    # Always read RAW, write CLEAN
     in_path = os.getenv(
         "DRUG_DATASET_IN",
         str(project_root / "data" / "processed" / "drug_knowledge_bot_ready_final.csv"),
     )
-
     out_path = os.getenv(
         "DRUG_DATASET_OUT",
         str(project_root / "data" / "processed" / "drug_knowledge_bot_ready_clean.csv"),
@@ -802,29 +1096,33 @@ def main() -> None:
     )
     df.columns = [c.strip() for c in df.columns]
 
-    # Long text columns
-    long_cols = ["indications", "dosage_and_administration", "contraindications"]
-    for col in long_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: clean_long_text(x, max_chars=1200))
+    # Long text columns (stronger cleaning)
+    if "indications" in df.columns:
+        df["indications"] = df["indications"].apply(lambda x: clean_indications_text(x, max_chars=1200))
 
-    # Warnings
-    if "warnings" in df.columns:
-        df["warnings"] = df["warnings"].apply(
-            lambda x: clean_fda_warnings_section_level(x, max_chars=1200)
+    if "dosage_and_administration" in df.columns:
+        df["dosage_and_administration"] = df["dosage_and_administration"].apply(
+            lambda x: clean_dosage_text(x, max_chars=1200)
         )
+
+    if "contraindications" in df.columns:
+        df["contraindications"] = df["contraindications"].apply(
+            lambda x: clean_contraindications_text(x, max_chars=1200)
+        )
+
+    # Warnings (keep stable clean behavior)
+    if "warnings" in df.columns:
+        df["warnings"] = df["warnings"].apply(lambda x: clean_fda_warnings_section_level(x, max_chars=1200))
 
     # Brand names
     if "brand_names" in df.columns:
-        df["brand_names"] = df["brand_names"].apply(
-            lambda x: trim_brand_names(x, max_items=20)
-        )
+        df["brand_names"] = df["brand_names"].apply(lambda x: trim_brand_names(x, max_items=20))
 
     # Route
     if "route" in df.columns:
         df["route"] = df["route"].apply(normalize_route)
 
-    # Side effects buckets
+    # Side effects buckets (already clean; light normalization + dedupe only)
     se_cols = [
         "common_side_effects",
         "less_common_side_effects",
