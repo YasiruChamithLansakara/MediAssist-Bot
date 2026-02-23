@@ -227,7 +227,14 @@ export default function App() {
           </button>
         </div>
 
-        {response?.query && (
+        {loading && (
+          <div className="loadingContainer">
+            <div className="spinner"></div>
+            <div className="loadingText">Searching drug database...</div>
+          </div>
+        )}
+
+        {response?.query && !loading && (
           <div className="apiLine">
             <span className="muted">API:</span>{" "}
             <a
