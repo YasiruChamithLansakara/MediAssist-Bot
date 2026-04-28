@@ -1,4 +1,5 @@
 :root {
+  --bg: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
   --bg: #f4f6f8;
   --card: #ffffff;
   --text: #111827;
@@ -20,6 +21,9 @@
 
   --primary: #111827;
   --primaryText: #ffffff;
+  
+  --accent: #3b82f6;
+  --accentLight: #60a5fa;
 }
 
 * {
@@ -71,11 +75,15 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-family: Arial, sans-serif;
 }
 
 .appShell {
   min-height: 100vh;
+  animation: fadeIn 0.6s ease-out;
 }
 
 .container {
@@ -117,8 +125,13 @@ body {
   color: #111;
 }
 
-.chipOff {
-  background: #fff;
+label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+label span {
   color: var(--muted);
 }
 
@@ -164,6 +177,7 @@ body {
 }
 
 .primaryButton {
+.primaryButton {
   background: var(--primary);
   color: var(--primaryText);
 }
@@ -207,6 +221,21 @@ body {
   border-radius: 10px;
   border: 1px solid var(--border);
   font-weight: 700;
+  animation: fadeInUp 0.4s ease-out;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.notice.bad {
+  border-color: #facaca;
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.notice.warn {
+  border-color: #f3d17a;
+  background: var(--amber-soft);
+  color: var(--amber-text);
 }
 
 .notice.bad {
@@ -249,6 +278,35 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 20px;
+}
+
+.title {
+  margin: 0 0 8px 0;
+  font-size: 42px;
+  letter-spacing: -1px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #0f172a 0%, #475569 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.sectionHead span,
+.resultTop p {
+  color: var(--muted);
+  font-weight: 800;
+
+.panel {
+  padding: 16px;
+}
+
+.sectionHead,
+.resultTop,
+.actionsRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 14px;
 }
 
@@ -262,6 +320,9 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  border-radius: 14px;
+  padding: 12px 18px;
+  border: 2px solid var(--border);
 }
 
 .suggestButton {
@@ -302,6 +363,14 @@ body {
 
 .badge:hover {
   transform: scale(1.05);
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  animation: fadeInUp 0.5s ease-out 0.1s both;
+  transition: all 0.3s ease;
+}
+
+.badge:hover {
+  transform: scale(1.05);
 }
 
 .matchBadge.good {
@@ -321,12 +390,9 @@ body {
 
 .highlightBox {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid #c6e2e6;
-  border-radius: 8px;
-  background: var(--primary-soft);
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
 }
 
 .highlightMeta {
@@ -393,6 +459,49 @@ body {
 }
 
 .section h3 {
+  margin: 0 0 16px 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+
+/* Side Effects */
+.sideEffects {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sideRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #fafbfc 0%, #f8fafc 100%);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.sideRow:hover {
+  transform: translateX(4px);
+  border-color: var(--accentLight);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.sideKey {
+  font-weight: 900;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+.sideVal {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 14px;
   margin: 0 0 10px 0;
   font-size: 22px;
 }
@@ -401,6 +510,23 @@ body {
 .accordion,
 .detectedList {
   display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.accordionRow {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fafbfc 0%, #f8fafc 100%);
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeIn 0.4s ease-out;
+}
+
+.accordionRow:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  transform: translateX(4px);
+  border-color: var(--accentLight);
   gap: 10px;
   margin-top: 10px;
 }
@@ -417,6 +543,10 @@ body {
   min-height: 44px;
   display: flex;
   align-items: center;
+  padding: 16px 18px;
+  background: rgba(248, 250, 252, 0.8);
+  border-bottom: 2px solid var(--border);
+  backdrop-filter: blur(10px);
   justify-content: space-between;
   align-items: center;
   padding: 12px;
@@ -431,6 +561,7 @@ body {
 }
 
 .accordionBody {
+  padding: 18px;
   padding: 12px;
 }
 
@@ -446,9 +577,20 @@ body {
   color: #2563eb;
   font-weight: 900;
   cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.rawToggle:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--accentLight);
 }
 
 .codeBlock {
+  margin-top: 16px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   margin-top: 10px;
   background: #0b1220;
   color: #e5e7eb;
@@ -459,6 +601,157 @@ body {
   max-height: 420px;
 }
 
+/* ========================= */
+/* SUGGESTIONS UI */
+/* ========================= */
+
+.message.user {
+  align-self: flex-end;
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: #fff;
+}
+
+.message.loading {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.message pre {
+  margin: 0;
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.drugStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.drugStrip span {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: var(--blue-text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.chatComposer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.suggestBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #ffffff;
+
+.confidenceBarLabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.confidenceBarLabel .label {
+  color: var(--muted);
+}
+
+.confidenceBarLabel .value {
+  font-family: "Courier New", monospace;
+  font-weight: 900;
+  font-size: 14px;
+}
+
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.suggestBtn:hover {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.15);
+}
+
+.suggestBtn:active {
+  transform: translateY(-1px);
+}
+
+.suggestBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+}
+
+.suggestText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.suggestHint {
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--accent);
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.suggestBtn:hover .suggestHint {
+  color: var(--accentLight);
+  transform: translateX(2px);
+}
+
+.footer {
+  margin: 48px 0 24px;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+}
+
+/* Responsive */
+@media (max-width: 720px) {
+  .container {
+    padding: 24px 16px;
+  }
+
+  .header h1 {
+    font-size: 42px;
 /* 🔥 SUGGESTIONS UI (FIXED) */
 
 .suggestGrid {
@@ -544,6 +837,23 @@ body {
   .uploadGrid,
   .detectedItem {
     grid-template-columns: 1fr;
+  }
+  
+  .card {
+    padding: 20px;
+  }
+  
+  .title {
+    font-size: 32px;
+  }
+  
+  .cardTop {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .badge {
+    align-self: flex-start;
   }
 
   .tabs {

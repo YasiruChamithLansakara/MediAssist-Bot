@@ -384,49 +384,37 @@ export default function App() {
           <div className="apiBadge">{API_BASE}</div>
         </header>
 
-        <div className="searchRow">
-          <input
-            className="input"
-            placeholder="Enter drug name (e.g. paracetamol)"
-            value={drug}
-            onChange={(e) => setDrug(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") runLookup();
-            }}
-          />
-
-          <button
-            className="btn btnPrimary"
-            onClick={runLookup}
-            disabled={lookupLoading || !drug.trim()}
-          >
-            {lookupLoading ? "Searching…" : "Search"}
-          </button>
-
-          <button
-            className="btn btnGhost"
-            onClick={() => {
-              setDrug("");
-              setLookupResponse(null);
-              setLookupError("");
-              resetLookupToggles();
-            }}
-            disabled={lookupLoading}
-          >
-            Clear
-          </button>
-        </div>
-
-        {lookupResponse?.query && (
-          <div className="apiLine">
-            <span className="muted">API:</span>{" "}
-            <a
-              href={`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-              target="_blank"
-              rel="noreferrer"
+        <section className="contextPanel" aria-label="Patient context">
+          <label>
+            <span>Disease</span>
+            <select
+              value={disease}
+              onChange={(event) =>
+                setDisease(normalizeDisease(event.target.value))
+              }
             >
-              {`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-            </a>
+              <option value="">Select disease</option>
+              {DISEASE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Age</span>
+            <input
+              type="number"
+              min="1"
+              max="120"
+              inputMode="numeric"
+              value={age}
+              onChange={(event) => setAge(event.target.value)}
+              placeholder="1-120"
+            />
+          </label>
+          <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
+            {contextReady ? "Context ready" : contextMessage}
           </div>
         )}
 
@@ -484,23 +472,24 @@ export default function App() {
           />
         )}
 
-        {activeView === "prescription" && (
-          <PrescriptionView
-            fileInputRef={fileInputRef}
-            uploadFile={uploadFile}
-            previewUrl={previewUrl}
-            loading={ocrLoading}
-            analyzeLoading={ocrAnalyzeLoading}
-            error={ocrError}
-            result={ocrResult}
-            ocrText={ocrText}
-            setOcrText={setOcrText}
-            onFileChange={onFileChange}
-            onUpload={uploadPrescription}
-            onAnalyzeText={analyzeOcrText}
-            onSendToChat={sendDetectedToChat}
-            contextReady={contextReady}
-          />
+        {loading && (
+          <div className="loadingContainer">
+            <div className="spinner"></div>
+            <div className="loadingText">Searching drug database...</div>
+          </div>
+        )}
+
+        {response?.query && !loading && (
+          <div className="apiLine">
+            <span className="muted">API:</span>{" "}
+            <a
+              href={`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+            </a>
+          </div>
         )}
 
         <footer className="footer">
