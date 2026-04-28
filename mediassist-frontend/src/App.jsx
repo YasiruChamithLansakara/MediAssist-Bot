@@ -416,7 +416,7 @@ export default function App() {
           <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
             {contextReady ? "Context ready" : contextMessage}
           </div>
-        )}
+        </section>
 
         <nav className="tabs" aria-label="MediAssist views">
           {[
