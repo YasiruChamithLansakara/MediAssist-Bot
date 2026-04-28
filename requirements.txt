@@ -1,40 +1,22 @@
-# -----------------------------
-# Core Python Libraries
-# -----------------------------
+# Production API dependencies
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+
+# Drug lookup and data handling
 numpy
 pandas
+rapidfuzz
 
-# -----------------------------
-# Image Processing & OCR
-# -----------------------------
-opencv-python
+# Prescription OCR
 pytesseract
 Pillow
-easyocr
 
-# -----------------------------
-# NLP and AI Models
-# -----------------------------
-transformers
-torch
-sentencepiece
-accelerate
-spacy
-
-# -----------------------------
-# Web and API Requests
-# -----------------------------
+# Utilities
 requests
-flask
-streamlit
 python-dotenv
 
-# -----------------------------
-# Utilities and Tools
-# -----------------------------
-matplotlib
-
-# -----------------------------
-# Testing
-# -----------------------------
+# Tests
 pytest
+httpx

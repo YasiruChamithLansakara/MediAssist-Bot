@@ -1,57 +1,119 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
-/* ------------------------------------------------------------------ */
-/* Helpers */
-/* ------------------------------------------------------------------ */
+const DISEASE_OPTIONS = [
+  { value: "diabetes", label: "Diabetes" },
+  { value: "hypertension", label: "Hypertension" },
+  { value: "asthma", label: "Asthma" },
+  { value: "heart disease", label: "Heart Disease" },
+  { value: "arthritis", label: "Arthritis" },
+];
+
+const LS_KEYS = {
+  disease: "ma_disease",
+  age: "ma_age",
+};
+
+function normalizeDisease(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function isValidAge(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 120;
+}
+
 function clampText(text = "", maxLen = 180) {
   if (!text) return "";
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen).trimEnd() + "…";
+  return text.length <= maxLen ? text : `${text.slice(0, maxLen).trimEnd()}...`;
 }
 
 function normalizeSuggestionItem(item) {
-  // Backend may return: ["bzk", "acetaminophen"]
   if (typeof item === "string") return item.trim();
-
-  // Or backend may return: [{name:"bzk", score:87.2}, ...]
   if (item && typeof item === "object") {
-    const maybeName =
-      item.name ?? item.label ?? item.value ?? item.drug ?? item.generic_name;
-    if (typeof maybeName === "string") return maybeName.trim();
+    return String(
+      item.name ??
+        item.label ??
+        item.value ??
+        item.drug ??
+        item.generic_name ??
+        "",
+    ).trim();
   }
-
   return "";
 }
 
 function statusToUi(status) {
-  // ✅ Uses backend response.status directly
   if (status === "ok") return "ok";
   if (status === "low_confidence") return "low";
   if (status === "no_match") return "none";
   return "idle";
 }
 
-function badgeToneFromScore(score) {
+function badgeTone(score) {
   const s = Number(score ?? 0);
   if (s >= 95) return "good";
   if (s >= 80) return "warn";
   return "bad";
 }
 
-/* ------------------------------------------------------------------ */
-/* App */
-/* ------------------------------------------------------------------ */
+function buildLookupUrl(query, disease, age) {
+  return `${API_BASE}/lookup?drug=${encodeURIComponent(query)}&disease=${encodeURIComponent(
+    disease,
+  )}&age=${encodeURIComponent(age)}`;
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const payload = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+
+    if (!response.ok) {
+      const message =
+        payload?.error?.message ||
+        payload?.detail?.message ||
+        (typeof payload === "string" && payload) ||
+        `API error ${response.status}`;
+      throw new Error(message);
+    }
+
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Request timed out. Check that the backend is running.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default function App() {
+  const [activeView, setActiveView] = useState("lookup");
+  const [disease, setDisease] = useState(() =>
+    normalizeDisease(localStorage.getItem(LS_KEYS.disease)),
+  );
+  const [age, setAge] = useState(() => localStorage.getItem(LS_KEYS.age) || "");
+
   const [drug, setDrug] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState(null);
-  const [error, setError] = useState("");
-
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResponse, setLookupResponse] = useState(null);
+  const [lookupError, setLookupError] = useState("");
   const [showBrandsFull, setShowBrandsFull] = useState(false);
-
   const [openSections, setOpenSections] = useState({
     indications: false,
     dosage: false,
@@ -60,65 +122,58 @@ export default function App() {
     raw: false,
   });
 
-  const [selectedSuggestion, setSelectedSuggestion] = useState("");
+  const [chatInput, setChatInput] = useState("");
+  const [chatDrug, setChatDrug] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
 
-  // ✅ 1) Use backend status (no guessing)
-  const status = useMemo(
-    () => statusToUi(response?.status),
-    [response?.status],
-  );
+  const [uploadFile, setUploadFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrAnalyzeLoading, setOcrAnalyzeLoading] = useState(false);
+  const [ocrResult, setOcrResult] = useState(null);
+  const [ocrText, setOcrText] = useState("");
+  const [ocrError, setOcrError] = useState("");
 
-  // ✅ 2) Use best_match (not matches[0])
-  const match = response?.best_match || null;
+  const fileInputRef = useRef(null);
 
-  const normalized = response?.normalized || "";
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.disease, disease || "");
+  }, [disease]);
 
-  // Prefer backend best_score; fallback to match.score
-  const bestScore = Number(response?.best_score ?? match?.score ?? 0);
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.age, age || "");
+  }, [age]);
 
-  // ✅ 3) Show confidence in UI (0.95 → 95%)
-  const confidencePercent = useMemo(() => {
-    const c = Number(response?.confidence);
-    if (!Number.isFinite(c)) return null;
-    return Math.round(c * 100);
-  }, [response?.confidence]);
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
-  // suggestions can still be string[] (or tolerate object[] just in case)
+  const contextReady = disease.trim() && isValidAge(age);
+  const contextMessage = useMemo(() => {
+    if (!disease.trim()) return "Select a disease.";
+    if (!isValidAge(age)) return "Enter age 1-120.";
+    return "";
+  }, [disease, age]);
+
+  const lookupStatus = statusToUi(lookupResponse?.status);
+  const match = lookupResponse?.best_match || null;
+  const bestScore = Number(lookupResponse?.best_score ?? match?.score ?? 0);
+  const confidencePercent = Number.isFinite(Number(lookupResponse?.confidence))
+    ? Math.round(Number(lookupResponse?.confidence) * 100)
+    : null;
   const suggestions = useMemo(() => {
-    const raw = response?.suggestions;
+    const raw = lookupResponse?.suggestions;
     if (!Array.isArray(raw)) return [];
+    return Array.from(
+      new Set(raw.map(normalizeSuggestionItem).filter(Boolean)),
+    );
+  }, [lookupResponse]);
 
-    const clean = raw.map(normalizeSuggestionItem).filter(Boolean);
-    return Array.from(new Set(clean));
-  }, [response]);
-
-  const confidence = useMemo(() => {
-    if (!match) return { label: "", tone: "neutral" };
-
-    const tone = badgeToneFromScore(bestScore);
-
-    // show % if available; fallback to score
-    const pctText =
-      typeof confidencePercent === "number" ? `${confidencePercent}%` : null;
-
-    const label =
-      tone === "good"
-        ? `High confidence match (${pctText ?? `Score: ${bestScore.toFixed(1)}`})`
-        : tone === "warn"
-          ? `Medium confidence — verify (${pctText ?? `Score: ${bestScore.toFixed(1)}`})`
-          : `Low confidence (${pctText ?? `Score: ${bestScore.toFixed(1)}`})`;
-
-    return { label, tone };
-  }, [match, bestScore, confidencePercent]);
-
-  const brandNames = match?.brand_names || "";
-  const brandShort = clampText(brandNames, 170);
-
-  const toggleSection = (key) => {
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const resetToggles = () => {
+  const resetLookupToggles = () => {
     setShowBrandsFull(false);
     setOpenSections({
       indications: false,
@@ -129,322 +184,821 @@ export default function App() {
     });
   };
 
-  const clearAll = () => {
-    setDrug("");
-    setResponse(null);
-    setError("");
-    setSelectedSuggestion("");
-    resetToggles();
-  };
-
-  /* ------------------------------------------------------------------ */
-  /* API calls */
-  /* ------------------------------------------------------------------ */
   const lookupDrugWithValue = async (value) => {
-    const q = String(value || "").trim();
-    if (!q) return;
+    const query = String(value || "").trim();
+    const d = normalizeDisease(disease);
+    const a = Number(age);
 
-    setLoading(true);
-    setError("");
-    setResponse(null);
-    resetToggles();
+    if (!d || !isValidAge(a)) {
+      setLookupError(contextMessage || "Set disease and age first.");
+      return;
+    }
+    if (!query) {
+      setLookupError("Enter a drug name.");
+      return;
+    }
+
+    setLookupLoading(true);
+    setLookupError("");
+    setLookupResponse(null);
+    resetLookupToggles();
 
     try {
-      const res = await fetch(
-        `${API_BASE}/lookup?drug=${encodeURIComponent(q)}`,
-      );
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`API error ${res.status}: ${txt}`);
-      }
-      const data = await res.json();
-      setResponse(data);
-    } catch (e) {
-      setError(e?.message || "Failed to connect to API");
+      const data = await fetchJson(buildLookupUrl(query, d, a));
+      setLookupResponse(data);
+    } catch (error) {
+      setLookupError(error?.message || "Lookup failed.");
     } finally {
-      setLoading(false);
+      setLookupLoading(false);
     }
   };
 
-  const lookupDrug = async () => {
-    setSelectedSuggestion("");
-    await lookupDrugWithValue(drug);
+  const runLookup = () => lookupDrugWithValue(drug);
+
+  const applySuggestion = (suggestion) => {
+    setDrug(suggestion);
+    lookupDrugWithValue(suggestion);
   };
 
-  const applySuggestion = (s) => {
-    const val = String(s || "").trim();
-    if (!val) return;
-    setSelectedSuggestion(val);
-    setDrug(val);
-    lookupDrugWithValue(val);
+  const sendChat = async (messageOverride, drugOverride) => {
+    const message = String(messageOverride ?? chatInput).trim();
+    const d = normalizeDisease(disease);
+    const a = Number(age);
+    const selectedDrug = String(drugOverride ?? chatDrug).trim();
+
+    if (!d || !isValidAge(a)) {
+      setChatError(contextMessage || "Set disease and age first.");
+      return;
+    }
+    if (!message) {
+      setChatError("Enter a message.");
+      return;
+    }
+
+    setChatLoading(true);
+    setChatError("");
+    setChatInput("");
+    setChatMessages((items) => [...items, { role: "user", text: message }]);
+
+    const payload = { message, disease: d, age: a };
+    if (selectedDrug) payload.drug = selectedDrug;
+
+    try {
+      const data = await fetchJson(
+        `${API_BASE}/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        20000,
+      );
+      setChatMessages((items) => [
+        ...items,
+        { role: "assistant", text: data.answer, data },
+      ]);
+    } catch (error) {
+      setChatError(error?.message || "Chat failed.");
+    } finally {
+      setChatLoading(false);
+    }
   };
 
-  const onKeyDown = (e) => {
-    if (e.key === "Enter") lookupDrug();
-    if (e.key === "Escape") clearAll();
+  const useLookupInChat = () => {
+    const name = match?.generic_name_clean || match?.generic_name || drug;
+    if (!name) return;
+    setChatDrug(name);
+    setChatInput(`Is ${name} safe for my context?`);
+    setActiveView("chat");
   };
 
-  /* ------------------------------------------------------------------ */
-  /* Render */
-  /* ------------------------------------------------------------------ */
+  const onFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setUploadFile(file);
+    setOcrResult(null);
+    setOcrText("");
+    setOcrError("");
+
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(file ? URL.createObjectURL(file) : "");
+  };
+
+  const uploadPrescription = async () => {
+    const d = normalizeDisease(disease);
+    const a = Number(age);
+
+    if (!d || !isValidAge(a)) {
+      setOcrError(contextMessage || "Set disease and age first.");
+      return;
+    }
+    if (!uploadFile) {
+      setOcrError("Choose an image file.");
+      return;
+    }
+
+    const form = new FormData();
+    form.append("file", uploadFile);
+    form.append("disease", d);
+    form.append("age", String(a));
+
+    setOcrLoading(true);
+    setOcrError("");
+    setOcrResult(null);
+    setOcrText("");
+
+    try {
+      const data = await fetchJson(
+        `${API_BASE}/prescription`,
+        { method: "POST", body: form },
+        45000,
+      );
+      setOcrResult(data);
+      setOcrText(data.ocr?.text || "");
+    } catch (error) {
+      setOcrError(error?.message || "Prescription OCR failed.");
+    } finally {
+      setOcrLoading(false);
+    }
+  };
+
+  const analyzeOcrText = async () => {
+    const d = normalizeDisease(disease);
+    const a = Number(age);
+    const text = String(ocrText || "").trim();
+
+    if (!d || !isValidAge(a)) {
+      setOcrError(contextMessage || "Set disease and age first.");
+      return;
+    }
+    if (!text) {
+      setOcrError("Enter OCR text to analyze.");
+      return;
+    }
+
+    setOcrAnalyzeLoading(true);
+    setOcrError("");
+
+    try {
+      const data = await fetchJson(
+        `${API_BASE}/prescription/analyze-text`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, disease: d, age: a }),
+        },
+        20000,
+      );
+      setOcrResult((previous) => ({
+        ...(previous || {}),
+        ...data,
+        file: previous?.file,
+        preprocessing: previous?.preprocessing,
+      }));
+      setOcrText(data.ocr?.text || text);
+    } catch (error) {
+      setOcrError(error?.message || "Text analysis failed.");
+    } finally {
+      setOcrAnalyzeLoading(false);
+    }
+  };
+
+  const sendDetectedToChat = (medicine) => {
+    const name =
+      medicine?.drug || medicine?.normalized || medicine?.query || "";
+    if (!name) return;
+    setActiveView("chat");
+    setChatDrug(name);
+    sendChat(`Explain ${name} from this prescription for my context.`, name);
+  };
+
   return (
-    <div className="page">
-      <div className="container">
-        <header className="header">
-          <h1>MediAssist – Drug Lookup</h1>
-
-          <div className="subline">
-            <span className="muted">Normalized:</span>
-            <span className={`chip ${normalized ? "chipOn" : "chipOff"}`}>
-              {normalized || "—"}
-            </span>
+    <main className="appShell">
+      <section className="workspace">
+        <header className="topBar">
+          <div>
+            <div className="eyebrow">MediAssist Bot</div>
+            <h1>Medication assistant</h1>
           </div>
+          <div className="apiBadge">{API_BASE}</div>
         </header>
 
-        <div className="searchRow">
-          <input
-            className="input"
-            placeholder="Enter drug name (e.g. paracetamol)"
-            value={drug}
-            onChange={(e) => setDrug(e.target.value)}
-            onKeyDown={onKeyDown}
-          />
-
-          <button
-            className="btn btnPrimary"
-            onClick={lookupDrug}
-            disabled={loading || !drug.trim()}
-          >
-            {loading ? "Searching…" : "Search"}
-          </button>
-
-          <button
-            className="btn btnGhost"
-            onClick={clearAll}
-            disabled={loading}
-          >
-            Clear
-          </button>
-        </div>
-
-        {response?.query && (
-          <div className="apiLine">
-            <span className="muted">API:</span>{" "}
-            <a
-              href={`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
-              target="_blank"
-              rel="noreferrer"
+        <section className="contextPanel" aria-label="Patient context">
+          <label>
+            <span>Disease</span>
+            <select
+              value={disease}
+              onChange={(event) =>
+                setDisease(normalizeDisease(event.target.value))
+              }
             >
-              {`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
-            </a>
+              <option value="">Select disease</option>
+              {DISEASE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Age</span>
+            <input
+              type="number"
+              min="1"
+              max="120"
+              inputMode="numeric"
+              value={age}
+              onChange={(event) => setAge(event.target.value)}
+              placeholder="1-120"
+            />
+          </label>
+          <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
+            {contextReady ? "Context ready" : contextMessage}
           </div>
+        </section>
+
+        <nav className="tabs" aria-label="MediAssist views">
+          {[
+            ["lookup", "Lookup"],
+            ["chat", "Chat"],
+            ["prescription", "Prescription"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={activeView === id ? "tab active" : "tab"}
+              onClick={() => setActiveView(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {activeView === "lookup" && (
+          <LookupView
+            drug={drug}
+            setDrug={setDrug}
+            loading={lookupLoading}
+            error={lookupError}
+            response={lookupResponse}
+            status={lookupStatus}
+            match={match}
+            bestScore={bestScore}
+            confidencePercent={confidencePercent}
+            suggestions={suggestions}
+            showBrandsFull={showBrandsFull}
+            setShowBrandsFull={setShowBrandsFull}
+            openSections={openSections}
+            setOpenSections={setOpenSections}
+            onLookup={runLookup}
+            onSuggestion={applySuggestion}
+            onUseInChat={useLookupInChat}
+            contextReady={contextReady}
+          />
         )}
 
-        {error && <div className="alert alertBad">❌ {error}</div>}
-
-        {/* backend status */}
-        {response && status === "none" && (
-          <div className="alert alertBad">
-            ❌ No confident match found. Try another spelling, brand name, or
-            remove dosage.
-          </div>
+        {activeView === "chat" && (
+          <ChatView
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            chatDrug={chatDrug}
+            setChatDrug={setChatDrug}
+            messages={chatMessages}
+            loading={chatLoading}
+            error={chatError}
+            onSend={() => sendChat()}
+            contextReady={contextReady}
+          />
         )}
 
-        {response && status === "low" && (
-          <div className="alert alertWarn">
-            ⚠️ Low confidence match — please select from suggestions below.
-          </div>
-        )}
-
-        {response && (status === "low" || status === "none") && (
-          <div className="card">
-            <div className="cardTop">
-              <div>
-                <h2 className="title">Suggestions</h2>
-                <div className="muted">
-                  Pick one to search again (for <b>{response.query}</b>)
-                </div>
-              </div>
-              {selectedSuggestion && (
-                <div className="chip chipOn">
-                  Selected: {selectedSuggestion}
-                </div>
-              )}
-            </div>
-
-            {suggestions.length ? (
-              <div className="suggestGrid">
-                {suggestions.map((s) => (
-                  <button
-                    key={s}
-                    className="suggestBtn"
-                    onClick={() => applySuggestion(s)}
-                    type="button"
-                    disabled={loading}
-                    title={s}
-                  >
-                    <span className="suggestText">{s}</span>
-                    <span className="suggestHint">Use this</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="muted" style={{ marginTop: 10 }}>
-                No suggestions returned.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* best_match + backend status */}
-        {response && match && status !== "none" && (
-          <div className="card">
-            <div className="cardTop">
-              <div>
-                <h2 className="title">
-                  {match.generic_name_clean || match.generic_name}
-                </h2>
-                <div className="muted">
-                  Matched as: <b>{match.match}</b>
-                </div>
-
-                {/* ✅ tiny confidence display (95%) */}
-                {typeof confidencePercent === "number" && (
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    Confidence: <b>{confidencePercent}%</b>
-                  </div>
-                )}
-              </div>
-
-              <div className={`badge badge-${confidence.tone}`}>
-                {confidence.tone === "good"
-                  ? "✅"
-                  : confidence.tone === "warn"
-                    ? "⚠️"
-                    : "❌"}{" "}
-                {confidence.label}
-              </div>
-            </div>
-
-            {bestScore < 95 && (
-              <div className="alert alertWarn">
-                ⚠️ Please verify this result before use.
-              </div>
-            )}
-
-            <div className="grid">
-              <Info label="Route" value={match.route} />
-              <Info label="Drug class" value={match.drug_class} />
-
-              <div className="infoBox span2">
-                <div className="label">Brand names</div>
-                <div className="value">
-                  {brandNames
-                    ? showBrandsFull
-                      ? brandNames
-                      : brandShort
-                    : "—"}
-                </div>
-                {brandNames.length > 170 && (
-                  <button
-                    className="linkBtn"
-                    onClick={() => setShowBrandsFull((s) => !s)}
-                    type="button"
-                  >
-                    {showBrandsFull ? "Show less" : "Show more"}
-                  </button>
-                )}
-              </div>
-
-              <Info
-                label="Sources"
-                value={(match.sources || "—").replaceAll("|", " | ")}
-              />
-              <Info label="Last updated" value={match.last_updated} />
-            </div>
-
-            {match.side_effects_buckets && (
-              <section className="section">
-                <h3>Side Effects</h3>
-                <div className="sideEffects">
-                  {Object.entries(match.side_effects_buckets).map(([k, v]) => (
-                    <div className="sideRow" key={k}>
-                      <div className="sideKey">
-                        {k.replaceAll("_", " ").toUpperCase()}
-                      </div>
-                      <div className="sideVal">{v}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section className="section">
-              <h3>Details</h3>
-              <div className="accordion">
-                <AccordionRow
-                  title="Indications"
-                  open={openSections.indications}
-                  onToggle={() => toggleSection("indications")}
-                  preview={clampText(match.indications, 120)}
-                  full={match.indications}
-                />
-                <AccordionRow
-                  title="Dosage & Administration"
-                  open={openSections.dosage}
-                  onToggle={() => toggleSection("dosage")}
-                  preview={clampText(match.dosage_and_administration, 120)}
-                  full={match.dosage_and_administration}
-                />
-                <AccordionRow
-                  title="Warnings"
-                  open={openSections.warnings}
-                  onToggle={() => toggleSection("warnings")}
-                  preview={clampText(match.warnings, 120)}
-                  full={match.warnings}
-                />
-                <AccordionRow
-                  title="Contraindications"
-                  open={openSections.contraindications}
-                  onToggle={() => toggleSection("contraindications")}
-                  preview={clampText(match.contraindications, 120)}
-                  full={match.contraindications}
-                />
-              </div>
-
-              <button
-                className="rawToggle"
-                onClick={() => toggleSection("raw")}
-                type="button"
-              >
-                {openSections.raw ? "▼ Hide raw JSON" : "▶ Show raw JSON"}
-              </button>
-
-              {openSections.raw && (
-                <pre className="codeBlock">
-                  {JSON.stringify(response, null, 2)}
-                </pre>
-              )}
-            </section>
-          </div>
+        {activeView === "prescription" && (
+          <PrescriptionView
+            fileInputRef={fileInputRef}
+            uploadFile={uploadFile}
+            previewUrl={previewUrl}
+            loading={ocrLoading}
+            analyzeLoading={ocrAnalyzeLoading}
+            error={ocrError}
+            result={ocrResult}
+            ocrText={ocrText}
+            setOcrText={setOcrText}
+            onFileChange={onFileChange}
+            onUpload={uploadPrescription}
+            onAnalyzeText={analyzeOcrText}
+            onSendToChat={sendDetectedToChat}
+            contextReady={contextReady}
+          />
         )}
 
         <footer className="footer">
-          ⚠️ Educational demo only — not a substitute for medical advice
+          Educational demo only. Confirm medication decisions with a licensed
+          clinician.
         </footer>
+      </section>
+    </main>
+  );
+}
+
+function LookupView({
+  drug,
+  setDrug,
+  loading,
+  error,
+  response,
+  status,
+  match,
+  bestScore,
+  confidencePercent,
+  suggestions,
+  showBrandsFull,
+  setShowBrandsFull,
+  openSections,
+  setOpenSections,
+  onLookup,
+  onSuggestion,
+  onUseInChat,
+  contextReady,
+}) {
+  const tone = badgeTone(bestScore);
+  const brandNames = match?.brand_names || "";
+  const brandShort = clampText(brandNames, 170);
+
+  const toggleSection = (key) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  return (
+    <section className="viewStack">
+      <div className="toolRow">
+        <input
+          className="textInput"
+          value={drug}
+          onChange={(event) => setDrug(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onLookup();
+          }}
+          placeholder="Drug name or brand"
+        />
+        <button
+          className="primaryButton"
+          type="button"
+          onClick={onLookup}
+          disabled={loading || !contextReady}
+        >
+          {loading ? "Searching..." : "Search"}
+        </button>
       </div>
+
+      {error && <Notice tone="bad">{error}</Notice>}
+
+      {response && status === "none" && (
+        <Notice tone="bad">No confident match found.</Notice>
+      )}
+      {response && status === "low" && (
+        <Notice tone="warn">Low confidence match. Check suggestions.</Notice>
+      )}
+
+      {response &&
+        (status === "low" || status === "none") &&
+        suggestions.length > 0 && (
+          <section className="panel">
+            <div className="sectionHead">
+              <h2>Suggestions</h2>
+              <span>{suggestions.length}</span>
+            </div>
+            <div className="suggestGrid">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="suggestButton"
+                  onClick={() => onSuggestion(suggestion)}
+                >
+                  <span>{suggestion}</span>
+                  <span>Use</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+      {response && match && status !== "none" && (
+        <section className="panel">
+          <div className="resultTop">
+            <div>
+              <h2>{match.generic_name_clean || match.generic_name}</h2>
+              <p>Matched as {match.match}</p>
+            </div>
+            <div className={`matchBadge ${tone}`}>
+              {confidencePercent ?? Math.round(bestScore)}% confidence
+            </div>
+          </div>
+
+          {response.context_highlights?.highlights && (
+            <ContextHighlights data={response.context_highlights} />
+          )}
+
+          <div className="infoGrid">
+            <Info label="Route" value={match.route} />
+            <Info label="Drug class" value={match.drug_class} />
+            <Info
+              label="Sources"
+              value={(match.sources || "-").replaceAll("|", " | ")}
+            />
+            <Info label="Last updated" value={match.last_updated || "-"} />
+            <div className="infoItem wide">
+              <span>Brand names</span>
+              <strong>
+                {brandNames ? (showBrandsFull ? brandNames : brandShort) : "-"}
+              </strong>
+              {brandNames.length > 170 && (
+                <button
+                  className="inlineButton"
+                  type="button"
+                  onClick={() => setShowBrandsFull((value) => !value)}
+                >
+                  {showBrandsFull ? "Show less" : "Show more"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {match.side_effects_buckets && (
+            <section className="contentBlock">
+              <h3>Side Effects</h3>
+              <div className="sideEffectGrid">
+                {Object.entries(match.side_effects_buckets).map(
+                  ([key, value]) => (
+                    <div className="sideEffectRow" key={key}>
+                      <span>{key.replaceAll("_", " ")}</span>
+                      <p>{value}</p>
+                    </div>
+                  ),
+                )}
+              </div>
+            </section>
+          )}
+
+          <section className="contentBlock">
+            <h3>Details</h3>
+            <div className="accordion">
+              <AccordionRow
+                title="Indications"
+                open={openSections.indications}
+                onToggle={() => toggleSection("indications")}
+                preview={clampText(match.indications, 140)}
+                full={match.indications}
+              />
+              <AccordionRow
+                title="Dosage and Administration"
+                open={openSections.dosage}
+                onToggle={() => toggleSection("dosage")}
+                preview={clampText(match.dosage_and_administration, 140)}
+                full={match.dosage_and_administration}
+              />
+              <AccordionRow
+                title="Warnings"
+                open={openSections.warnings}
+                onToggle={() => toggleSection("warnings")}
+                preview={clampText(match.warnings, 140)}
+                full={match.warnings}
+              />
+              <AccordionRow
+                title="Contraindications"
+                open={openSections.contraindications}
+                onToggle={() => toggleSection("contraindications")}
+                preview={clampText(match.contraindications, 140)}
+                full={match.contraindications}
+              />
+            </div>
+          </section>
+
+          <div className="actionsRow">
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={onUseInChat}
+            >
+              Send to chat
+            </button>
+            <button
+              className="ghostButton"
+              type="button"
+              onClick={() => toggleSection("raw")}
+            >
+              {openSections.raw ? "Hide JSON" : "Show JSON"}
+            </button>
+          </div>
+
+          {openSections.raw && (
+            <pre className="codeBlock">{JSON.stringify(response, null, 2)}</pre>
+          )}
+        </section>
+      )}
+    </section>
+  );
+}
+
+function ChatView({
+  chatInput,
+  setChatInput,
+  chatDrug,
+  setChatDrug,
+  messages,
+  loading,
+  error,
+  onSend,
+  contextReady,
+}) {
+  return (
+    <section className="viewStack">
+      <div className="chatPanel">
+        <div className="chatMessages">
+          {messages.length === 0 && (
+            <div className="emptyState">No chat messages yet.</div>
+          )}
+          {messages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={`message ${message.role}`}
+            >
+              <pre>{message.text}</pre>
+              {message.data?.matched_drugs?.length > 0 && (
+                <MatchedDrugStrip items={message.data.matched_drugs} />
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div className="message assistant loading">Thinking...</div>
+          )}
+        </div>
+
+        <div className="chatComposer">
+          <input
+            className="textInput"
+            value={chatDrug}
+            onChange={(event) => setChatDrug(event.target.value)}
+            placeholder="Optional drug"
+          />
+          <textarea
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                onSend();
+              }
+            }}
+            placeholder="Ask a medication question"
+          />
+          <button
+            className="primaryButton"
+            type="button"
+            onClick={onSend}
+            disabled={loading || !contextReady}
+          >
+            {loading ? "Sending..." : "Send"}
+          </button>
+        </div>
+      </div>
+      {error && <Notice tone="bad">{error}</Notice>}
+    </section>
+  );
+}
+
+function PrescriptionView({
+  fileInputRef,
+  uploadFile,
+  previewUrl,
+  loading,
+  analyzeLoading,
+  error,
+  result,
+  ocrText,
+  setOcrText,
+  onFileChange,
+  onUpload,
+  onAnalyzeText,
+  onSendToChat,
+  contextReady,
+}) {
+  const medicines = result?.detected_medicines || [];
+  const ocrConfidence = result?.ocr?.confidence ?? null;
+  const confidencePercent =
+    ocrConfidence !== null ? Math.round(ocrConfidence * 100) : null;
+
+  const getConfidenceTone = (pct) => {
+    if (pct === null) return "none";
+    if (pct >= 85) return "high";
+    if (pct >= 70) return "medium";
+    return "low";
+  };
+
+  const confidenceTone = getConfidenceTone(confidencePercent);
+
+  return (
+    <section className="viewStack">
+      <section className="uploadGrid">
+        <div className="uploadPanel">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onFileChange}
+          />
+          <button
+            className="primaryButton"
+            type="button"
+            onClick={onUpload}
+            disabled={loading || !contextReady || !uploadFile}
+          >
+            {loading ? "Extracting..." : "Extract text"}
+          </button>
+          {uploadFile && <div className="fileName">📄 {uploadFile.name}</div>}
+          {!uploadFile && (
+            <div className="emptyState">Choose a prescription image</div>
+          )}
+        </div>
+
+        <div className="previewPanel">
+          {previewUrl ? (
+            <img src={previewUrl} alt="Prescription preview" />
+          ) : (
+            <div className="emptyState">No image selected</div>
+          )}
+        </div>
+      </section>
+
+      {error && <Notice tone="bad">{error}</Notice>}
+
+      {result && (
+        <section className="panel">
+          <div className="sectionHead">
+            <h2>OCR Result</h2>
+            {confidencePercent !== null && (
+              <span className={`confidenceIndicator ${confidenceTone}`}>
+                {confidencePercent}% confidence
+              </span>
+            )}
+          </div>
+
+          {/* OCR Confidence Bar */}
+          {confidencePercent !== null && (
+            <div className="confidenceBar">
+              <div className="confidenceBarLabel">
+                <span className="label">OCR Extraction Confidence</span>
+                <span className="value">{confidencePercent}%</span>
+              </div>
+              <div className="confidenceBarTrack">
+                <div
+                  className={`confidenceBarFill ${confidenceTone}`}
+                  style={{ width: `${Math.min(confidencePercent, 100)}%` }}
+                />
+              </div>
+              <div className="ocrEditorHint">
+                {confidenceTone === "high" && "OCR text is highly reliable."}
+                {confidenceTone === "medium" &&
+                  "OCR text looks good but review for accuracy."}
+                {confidenceTone === "low" &&
+                  "OCR text may have errors. Please review and correct before proceeding."}
+              </div>
+            </div>
+          )}
+
+          <div className="ocrEditor">
+            <label>
+              <span>Extracted or corrected text</span>
+              <textarea
+                value={ocrText}
+                onChange={(event) => setOcrText(event.target.value)}
+                placeholder="OCR text will appear here. Edit if needed before re-detecting medicines."
+              />
+              <div className="ocrEditorHint">
+                ✏️ Edit text above and click "Re-detect medicines" to analyze
+                changes
+              </div>
+            </label>
+            <button
+              className="secondaryButton"
+              type="button"
+              onClick={onAnalyzeText}
+              disabled={analyzeLoading || !contextReady || !ocrText.trim()}
+            >
+              {analyzeLoading ? "Analyzing..." : "Re-detect medicines"}
+            </button>
+          </div>
+
+          <section className="contentBlock">
+            <h3>Detected Medicines</h3>
+            {medicines.length ? (
+              <div className="detectedList">
+                {medicines.map((medicine, index) => (
+                  <div
+                    className="detectedItem"
+                    key={`${medicine.drug}-${index}`}
+                  >
+                    <div>
+                      <strong>
+                        {medicine.drug || medicine.normalized || medicine.query}
+                      </strong>
+                      <span>
+                        {[medicine.dosage, medicine.frequency, medicine.route]
+                          .filter(Boolean)
+                          .join(" | ") || "No dosage pattern detected"}
+                      </span>
+                    </div>
+                    <button
+                      className="secondaryButton"
+                      type="button"
+                      onClick={() => onSendToChat(medicine)}
+                    >
+                      Chat
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState">
+                No medicines detected in OCR text.
+                <br />
+                Try uploading a clearer prescription image or manually entering
+                medicine names.
+              </div>
+            )}
+          </section>
+        </section>
+      )}
+
+      {!result && !error && !uploadFile && (
+        <div
+          className="panel"
+          style={{ padding: "32px 16px", textAlign: "center" }}
+        >
+          <div
+            className="emptyState"
+            style={{
+              minHeight: "200px",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            <div>
+              <h3 style={{ marginBottom: "8px" }}>📸 Upload a Prescription</h3>
+              <p style={{ color: "var(--muted)", margin: "0" }}>
+                Choose a prescription image (JPG, PNG) to extract medicine
+                information automatically.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ContextHighlights({ data }) {
+  const entries = Object.entries(data.highlights || {});
+  if (!entries.length) return null;
+
+  return (
+    <section className="highlightBox">
+      <div className="highlightMeta">Age group: {data.age_group || "-"}</div>
+      {entries.map(([key, values]) => (
+        <div key={key}>
+          <strong>{key.replaceAll("_", " ")}</strong>
+          <ul>
+            {(Array.isArray(values) ? values : [values]).map((value, index) => (
+              <li key={`${key}-${index}`}>{value}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function MatchedDrugStrip({ items }) {
+  return (
+    <div className="drugStrip">
+      {items
+        .filter((item) => item.best_match)
+        .slice(0, 3)
+        .map((item) => (
+          <span key={`${item.query}-${item.normalized}`}>
+            {item.best_match?.generic_name_clean ||
+              item.best_match?.generic_name ||
+              item.query}{" "}
+            - {Math.round(Number(item.confidence || 0) * 100)}%
+          </span>
+        ))}
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Small components */
-/* ------------------------------------------------------------------ */
 function Info({ label, value }) {
   return (
-    <div className="infoBox">
-      <div className="label">{label}</div>
-      <div className="value">{value || "—"}</div>
+    <div className="infoItem">
+      <span>{label}</span>
+      <strong>{value || "-"}</strong>
     </div>
   );
 }
@@ -453,26 +1007,17 @@ function AccordionRow({ title, open, onToggle, preview, full }) {
   const hasContent = Boolean(full && full.trim());
   return (
     <div className="accordionRow">
-      <div className="accordionHeader">
-        <div className="accordionTitle">{title}</div>
-        <button
-          className="btn btnMini"
-          onClick={onToggle}
-          disabled={!hasContent}
-          type="button"
-        >
-          {open ? "Hide" : "Show"}
-        </button>
-      </div>
-      <div className="accordionBody">
-        {!hasContent ? (
-          <div className="muted">—</div>
-        ) : open ? (
-          <div className="textBlock">{full}</div>
-        ) : (
-          <div className="textBlock muted">{preview}</div>
-        )}
+      <button type="button" onClick={onToggle} disabled={!hasContent}>
+        <span>{title}</span>
+        <span>{open ? "Hide" : "Show"}</span>
+      </button>
+      <div className={open ? "accordionBody open" : "accordionBody"}>
+        {hasContent ? (open ? full : preview) : "-"}
       </div>
     </div>
   );
+}
+
+function Notice({ tone, children }) {
+  return <div className={`notice ${tone}`}>{children}</div>;
 }
