@@ -104,10 +104,12 @@ async function fetchJson(url, options = {}, timeoutMs = 15000) {
 
 export default function App() {
   const [activeView, setActiveView] = useState("lookup");
-  const [disease, setDisease] = useState(() =>
+  const [disease, _setDisease] = useState(() =>
     normalizeDisease(localStorage.getItem(LS_KEYS.disease)),
   );
-  const [age, setAge] = useState(() => localStorage.getItem(LS_KEYS.age) || "");
+  const [age, _setAge] = useState(
+    () => localStorage.getItem(LS_KEYS.age) || "",
+  );
 
   const [drug, setDrug] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -382,39 +384,51 @@ export default function App() {
           <div className="apiBadge">{API_BASE}</div>
         </header>
 
-        <section className="contextPanel" aria-label="Patient context">
-          <label>
-            <span>Disease</span>
-            <select
-              value={disease}
-              onChange={(event) =>
-                setDisease(normalizeDisease(event.target.value))
-              }
+        <div className="searchRow">
+          <input
+            className="input"
+            placeholder="Enter drug name (e.g. paracetamol)"
+            value={drug}
+            onChange={(e) => setDrug(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") runLookup();
+            }}
+          />
+
+          <button
+            className="btn btnPrimary"
+            onClick={runLookup}
+            disabled={lookupLoading || !drug.trim()}
+          >
+            {lookupLoading ? "Searching…" : "Search"}
+          </button>
+
+          <button
+            className="btn btnGhost"
+            onClick={() => {
+              setDrug("");
+              setLookupResponse(null);
+              setLookupError("");
+              resetLookupToggles();
+            }}
+            disabled={lookupLoading}
+          >
+            Clear
+          </button>
+        </div>
+
+        {lookupResponse?.query && (
+          <div className="apiLine">
+            <span className="muted">API:</span>{" "}
+            <a
+              href={`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
+              target="_blank"
+              rel="noreferrer"
             >
-              <option value="">Select disease</option>
-              {DISEASE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Age</span>
-            <input
-              type="number"
-              min="1"
-              max="120"
-              inputMode="numeric"
-              value={age}
-              onChange={(event) => setAge(event.target.value)}
-              placeholder="1-120"
-            />
-          </label>
-          <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
-            {contextReady ? "Context ready" : contextMessage}
+              {`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
+            </a>
           </div>
-        </section>
+        )}
 
         <nav className="tabs" aria-label="MediAssist views">
           {[
