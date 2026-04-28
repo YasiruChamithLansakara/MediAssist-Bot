@@ -71,6 +71,8 @@
 
 body {
   margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
@@ -78,7 +80,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.page {
+.appShell {
   min-height: 100vh;
   animation: fadeIn 0.6s ease-out;
 }
@@ -136,8 +138,13 @@ body {
   transform: scale(1);
 }
 
-.chipOff {
-  background: #fff;
+label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+label span {
   color: var(--muted);
   opacity: 0.7;
 }
@@ -199,7 +206,7 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.btnPrimary {
+.primaryButton {
   background: var(--primary);
   color: var(--primaryText);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15);
@@ -291,16 +298,16 @@ body {
   backdrop-filter: blur(10px);
 }
 
-.alertBad {
-  background: var(--badBg);
-  color: var(--badText);
-  border-color: var(--badBorder);
+.notice.bad {
+  border-color: #facaca;
+  background: var(--red-soft);
+  color: var(--red-text);
 }
 
-.alertWarn {
-  background: var(--warnBg);
-  color: var(--warnText);
-  border-color: var(--warnBorder);
+.notice.warn {
+  border-color: #f3d17a;
+  background: var(--amber-soft);
+  color: var(--amber-text);
 }
 
 /* Cards */
@@ -321,7 +328,13 @@ body {
   border-color: var(--accentLight);
 }
 
-.cardTop {
+.panel {
+  padding: 16px;
+}
+
+.sectionHead,
+.resultTop,
+.actionsRow {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -339,14 +352,40 @@ body {
   background-clip: text;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
+.sectionHead span,
+.resultTop p {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.suggestGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   border-radius: 14px;
   padding: 12px 18px;
   border: 2px solid var(--border);
   font-weight: 800;
+}
+
+.suggestButton span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestButton span:last-child {
+  color: var(--primary-dark);
+}
+
+.matchBadge {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: 900;
   white-space: nowrap;
   font-size: 14px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
@@ -358,34 +397,31 @@ body {
   transform: scale(1.05);
 }
 
-.badge-good {
-  background: var(--goodBg);
-  color: var(--goodText);
-  border-color: var(--goodBorder);
+.matchBadge.good {
+  background: var(--green-soft);
+  color: var(--green-text);
 }
 
-.badge-warn {
-  background: var(--warnBg);
-  color: var(--warnText);
-  border-color: var(--warnBorder);
+.matchBadge.warn {
+  background: var(--amber-soft);
+  color: var(--amber-text);
 }
 
-.badge-bad {
-  background: var(--badBg);
-  color: var(--badText);
-  border-color: var(--badBorder);
+.matchBadge.bad {
+  background: var(--red-soft);
+  color: var(--red-text);
 }
 
-/* Info grid */
-.grid {
+.highlightBox {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   margin-top: 24px;
 }
 
-.span2 {
-  grid-column: 1 / -1;
+.highlightMeta {
+  color: var(--primary-dark);
+  font-weight: 900;
 }
 
 .infoBox {
@@ -472,8 +508,9 @@ body {
   font-size: 14px;
 }
 
-/* Accordion */
-.accordion {
+.sideEffectGrid,
+.accordion,
+.detectedList {
   display: grid;
   gap: 14px;
   margin-top: 16px;
@@ -494,9 +531,10 @@ body {
   border-color: var(--accentLight);
 }
 
-.accordionHeader {
+.accordionRow > button {
+  width: 100%;
+  min-height: 44px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 16px 18px;
   background: rgba(248, 250, 252, 0.8);
@@ -539,7 +577,6 @@ body {
   color: var(--accentLight);
 }
 
-/* Raw JSON */
 .codeBlock {
   margin-top: 16px;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -593,7 +630,47 @@ body {
 /* SUGGESTIONS UI */
 /* ========================= */
 
-.suggestGrid {
+.message.user {
+  align-self: flex-end;
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: #fff;
+}
+
+.message.loading {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.message pre {
+  margin: 0;
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.drugStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.drugStrip span {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: var(--blue-text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.chatComposer {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
@@ -611,8 +688,25 @@ body {
   padding: 16px 18px;
   background: #ffffff;
 
-  cursor: pointer;
+.confidenceBarLabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.confidenceBarLabel .label {
+  color: var(--muted);
+}
+
+.confidenceBarLabel .value {
+  font-family: "Courier New", monospace;
   font-weight: 900;
+  font-size: 14px;
+}
 
   color: var(--text);
   -webkit-text-fill-color: var(--text);
@@ -663,7 +757,6 @@ body {
   transform: translateX(2px);
 }
 
-/* Footer */
 .footer {
   margin: 48px 0 24px;
   text-align: center;
@@ -686,9 +779,15 @@ body {
     font-size: 42px;
   }
 
-  .searchRow,
-  .grid,
-  .suggestGrid {
+  .contextPanel,
+  .toolRow,
+  .infoGrid,
+  .suggestGrid,
+  .sideEffectRow,
+  .chatComposer,
+  .ocrEditor,
+  .uploadGrid,
+  .detectedItem {
     grid-template-columns: 1fr;
   }
   

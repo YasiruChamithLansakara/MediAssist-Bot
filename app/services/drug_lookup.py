@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
 import pandas as pd
 from rapidfuzz import process, fuzz
 
-# -----------------------------------------------------------------------------
-# CONFIG
-# -----------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# PATHS / CONFIG
+# ---------------------------------------------------------------------
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # .../MediAssist-Bot
 DEFAULT_CSV_PATH = os.getenv(
     "DRUG_DATASET_PATH",
-    # ✅ cleaned dataset is now the default
-    os.path.join("data", "processed", "drug_knowledge_bot_ready_clean.csv"),
+    str(PROJECT_ROOT / "data" / "processed" / "drug_knowledge_bot_ready_clean.csv"),
 )
 
 DEFAULT_TOP_K = 5
@@ -26,27 +29,34 @@ ALIASES = {
     "tylenol": "acetaminophen",
     "apap": "acetaminophen",
 }
-
 ALIAS_SCORE = 95.0
 
-# Status thresholds (0..1 confidence)
 OK_THRESHOLD = 0.85
 LOW_THRESHOLD = 0.60
-
-# ✅ Paracetamol-family typo threshold (high to avoid false positives)
 PARACETAMOL_TYPO_THRESHOLD = 85
 
-# -----------------------------------------------------------------------------
+SUPPORTED_DISEASES = [
+    "diabetes",
+    "hypertension",
+    "asthma",
+    "heart disease",
+    "arthritis",
+]
+
+
+# ---------------------------------------------------------------------
 # INTERNAL STORE
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 _df: pd.DataFrame | None = None
 _index: Dict[str, Dict[str, Any]] = {}
 _keys_all: List[str] = []
 _keys_primary: List[str] = []
+_store_lock = threading.Lock()
 
-# -----------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # NORMALIZATION + DOSAGE STRIPPING
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 _non_alnum_re = re.compile(r"[^a-z0-9\s\-]+")
 
 _DOSAGE_PATTERNS = [
@@ -79,51 +89,32 @@ def normalize_text(s: str) -> str:
 
 
 def apply_alias_only(q: str) -> Tuple[str, bool, Optional[str]]:
-    """
-    Returns: (normalized_query, used_alias, alias_target)
-
-    ✅ Includes safe typo rule for paracetamol-family.
-    """
     qn = normalize_text(q)
 
-    # Direct alias
+    # direct alias
     if qn in ALIASES:
         return qn, True, ALIASES[qn]
 
-    # ✅ Extra-safe paracetamol-family typo handling
+    # safe typo handling (paracetamol family only)
     if qn:
         score = fuzz.WRatio(qn, "paracetamol")
-
-        # Guard: apply only if query looks like paracetamol-family
-        looks_like_para = (
-            "paracet" in qn
-            or qn.startswith("par")
-            or "para" in qn
-        )
-
+        looks_like_para = ("paracet" in qn) or qn.startswith("par") or ("para" in qn)
         if looks_like_para and score >= PARACETAMOL_TYPO_THRESHOLD:
             return qn, True, "acetaminophen"
 
     return qn, False, None
 
 
-# -----------------------------------------------------------------------------
-# BACKEND RESPONSE STANDARDIZATION
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# RESPONSE STANDARDIZATION
+# ---------------------------------------------------------------------
 def score_to_confidence(score: float) -> float:
-    """Convert 0..100 score to 0..1 confidence (rounded)."""
     s = float(score or 0.0)
     s = max(0.0, min(100.0, s))
     return round(s / 100.0, 4)
 
 
 def classify_status(confidence: float, has_best: bool) -> str:
-    """
-    status:
-      - ok: confidence >= 0.85
-      - low_confidence: 0.60..0.85
-      - no_match: < 0.60 OR no best match
-    """
     if has_best and confidence >= OK_THRESHOLD:
         return "ok"
     if has_best and confidence >= LOW_THRESHOLD:
@@ -132,21 +123,183 @@ def classify_status(confidence: float, has_best: bool) -> str:
 
 
 def _dedupe_path(items: List[str]) -> List[str]:
-    """Remove duplicates but keep order (cleaner resolution_path)."""
+    if not items:
+        return []
     out: List[str] = []
     seen: set[str] = set()
 
-    for x in items:
-        raw = str(x)
-        key = normalize_text(raw)  # ✅ stable dedupe key
+    for raw_item in items:
+        raw = "" if raw_item is None else str(raw_item)
+        key = normalize_text(raw)
+
         if not key:
+            # keep the first raw element even if it normalizes empty
+            if not out:
+                out.append(raw)
             continue
+
         if key in seen:
             continue
         seen.add(key)
         out.append(raw)
 
+    if not out:
+        out = [str(items[0])]
+
     return out
+
+
+# ---------------------------------------------------------------------
+# AGE + DISEASE TAILORING (RULE-BASED, NO AGE DATA IN DATASET NEEDED)
+# ---------------------------------------------------------------------
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_MULTI_SPACE_RE = re.compile(r"\s+")
+
+
+def _age_group(age: int) -> str:
+    if age < 12:
+        return "pediatric"
+    if age < 18:
+        return "adolescent"
+    if age < 65:
+        return "adult"
+    return "elderly"
+
+
+def _contains(text: str, *keywords: str) -> bool:
+    t = (text or "").lower()
+    return any(k.lower() in t for k in keywords)
+
+
+def _extract_relevant_sentences(text: str, keywords: List[str], max_sentences: int = 4) -> List[str]:
+    if not text:
+        return []
+    chunks = [c.strip() for c in _SENT_SPLIT_RE.split(str(text)) if c.strip()]
+    keys = [k.lower() for k in keywords if k]
+    out: List[str] = []
+    for c in chunks:
+        cl = c.lower()
+        if any(k in cl for k in keys):
+            out.append(c)
+            if len(out) >= max_sentences:
+                break
+    return out
+
+
+def build_context_highlights(*, disease: str, age: int, match: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Produces a small, conservative set of highlights to help the UI/chatbot focus.
+
+    Output is intentionally simple:
+      - age_group
+      - highlights: {age: [...], disease: [...], general: [...]}
+      - recommended_sections
+    """
+    ag = _age_group(int(age))
+    d = (disease or "").strip().lower()
+
+    highlights: Dict[str, List[str]] = {"age": [], "disease": [], "general": []}
+
+    if not match:
+        highlights["general"].append("No drug matched yet. Provide a drug name for disease/age-based highlights.")
+        return {
+            "age_group": ag,
+            "highlights": {k: v for k, v in highlights.items() if v},
+            "recommended_sections": ["warnings", "contraindications", "dosage_and_administration"],
+        }
+
+    drug_class = (match.get("drug_class") or "").strip().lower()
+    warnings = (match.get("warnings") or "")
+    contraindications = (match.get("contraindications") or "")
+
+    blob = " ".join(
+        [
+            drug_class,
+            str(match.get("indications") or ""),
+            str(match.get("dosage_and_administration") or ""),
+            str(warnings or ""),
+            str(contraindications or ""),
+        ]
+    )
+    blob = _MULTI_SPACE_RE.sub(" ", blob).strip().lower()
+
+    # ---- Age highlights (keyword-based)
+    if ag in {"pediatric", "adolescent"}:
+        if _contains(blob, "pediatric", "children", "child", "infant", "neonate", "under 12", "under 18"):
+            highlights["age"].append("Label mentions pediatric/children considerations — verify suitability and dosing for this age.")
+    if ag == "elderly":
+        if _contains(blob, "elderly", "geriatric", "older patients", "65 years", "age 65"):
+            highlights["age"].append("Label mentions elderly/geriatric considerations — older adults may need extra caution or dose review.")
+
+    # ---- Disease highlights (conservative heuristics)
+    disease_keywords: Dict[str, List[str]] = {
+        "diabetes": ["diabetes", "diabetic", "blood sugar", "glucose", "hypoglyc", "hyperglyc"],
+        "hypertension": ["hypertension", "blood pressure", "bp", "fluid retention", "edema"],
+        "asthma": ["asthma", "bronchospasm", "wheezing", "respiratory"],
+        "heart disease": ["cardiovascular", "cardiac", "stroke", "myocard", "thrombot", "heart failure", "arrhythm"],
+        "arthritis": ["arthritis", "inflammation", "pain", "joint", "gi bleeding", "ulcer"],
+    }
+    kws = disease_keywords.get(d, [])
+
+    if kws and any(k in blob for k in kws):
+        highlights["disease"].append(
+            f"Label includes terms related to {d}. Review warnings/contraindications for condition-specific cautions."
+        )
+
+    # Extra helpful rule: NSAID + CV language for hypertension/heart disease
+    if d in {"hypertension", "heart disease"}:
+        if ("nsaid" in drug_class or "nonsteroidal" in blob) and _contains(blob, "cardiovascular", "thrombotic", "stroke", "myocardial"):
+            highlights["disease"].append(
+                "Cardiovascular risk language detected (often relevant to some pain/anti-inflammatory medicines) — verify appropriateness for this condition."
+            )
+
+    # ---- General highlights
+    if str(warnings).strip():
+        highlights["general"].append("Warnings section exists — review key safety notes before use.")
+    if str(contraindications).strip():
+        highlights["general"].append("Contraindications section exists — check if any apply.")
+
+    # Optional: add small evidence snippets (kept short)
+    disease_snips = _extract_relevant_sentences(
+        " ".join([warnings or "", contraindications or "", str(match.get("dosage_and_administration") or "")]),
+        kws,
+        max_sentences=3,
+    )
+    age_snips = _extract_relevant_sentences(warnings or "", ["pediatric", "children", "elderly", "geriatric"], max_sentences=2)
+
+    snippets: Dict[str, List[str]] = {}
+    if age_snips:
+        snippets["age_relevant"] = age_snips
+    if disease_snips:
+        snippets["disease_relevant"] = disease_snips
+
+    out = {
+        "age_group": ag,
+        "highlights": {k: v for k, v in highlights.items() if v},
+        "recommended_sections": ["warnings", "contraindications", "dosage_and_administration"],
+    }
+    if snippets:
+        out["snippets"] = snippets
+
+    return out
+
+
+def build_tailored_context(*, disease: str, age: int, match: Dict[str, Any]) -> Dict[str, Any]:
+    highlights = build_context_highlights(disease=disease, age=age, match=match)
+    notes: List[str] = []
+
+    for items in (highlights.get("highlights") or {}).values():
+        if isinstance(items, list):
+            notes.extend(str(item) for item in items if str(item).strip())
+
+    return {
+        "disease": disease,
+        "age": int(age),
+        "age_group": highlights.get("age_group") or _age_group(int(age)),
+        "notes": notes,
+        "snippets": highlights.get("snippets") or {},
+        "recommended_sections": highlights.get("recommended_sections") or [],
+    }
 
 
 def make_response(
@@ -158,13 +311,19 @@ def make_response(
     suggestions: List[str],
     match_type: str,
     resolution_path: List[str],
+    disease: Optional[str] = None,
+    age: Optional[int] = None,
 ) -> Dict[str, Any]:
     best_match = matches[0] if matches else None
     best_score = float(best_match.get("score", 0.0)) if best_match else 0.0
     confidence = score_to_confidence(best_score)
     status = classify_status(confidence, bool(best_match))
 
-    return {
+    path = _dedupe_path(resolution_path)
+    if not path:
+        path = [query]
+
+    resp: Dict[str, Any] = {
         "query": query,
         "normalized": normalized or "",
         "status": status,
@@ -175,116 +334,123 @@ def make_response(
         "suggestions": suggestions,
         "message": message,
         "match_type": match_type,
-        "resolution_path": _dedupe_path(resolution_path),
+        "resolution_path": path,
     }
 
+    # include context if provided (service-level contract)
+    if disease is not None or age is not None:
+        resp["context"] = {"disease": disease, "age": age}
+        resp["supported_diseases"] = SUPPORTED_DISEASES
 
-# -----------------------------------------------------------------------------
+        # NEW: include context_highlights if we have a match + full context
+        if best_match is not None and disease is not None and age is not None:
+            context_highlights = build_context_highlights(
+                disease=str(disease),
+                age=int(age),
+                match=best_match,
+            )
+            resp["context_highlights"] = context_highlights
+            resp["tailored"] = build_tailored_context(
+                disease=str(disease),
+                age=int(age),
+                match=best_match,
+            )
+
+    return resp
+
+
+# ---------------------------------------------------------------------
 # LOAD + CACHE
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+_BRAND_SUFFIX_RE = re.compile(r",\s*\.\.\.\s*\(\+\d+\s+more\)\s*$", re.IGNORECASE)
+
+
+def _strip_brand_suffix(s: str) -> str:
+    return _BRAND_SUFFIX_RE.sub("", (s or "").strip())
+
+
 def init_store(csv_path: str = DEFAULT_CSV_PATH) -> None:
     global _df, _index, _keys_all, _keys_primary
 
     if _df is not None:
         return
 
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(
-            f"Drug dataset not found: {csv_path}\n"
-            f"Tip: set DRUG_DATASET_PATH env var or ensure the file exists under data/processed/."
-        )
+    with _store_lock:
+        if _df is not None:
+            return
 
-    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
-    df.columns = [c.strip() for c in df.columns]
+        csv_path = str(Path(csv_path))
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"Drug dataset not found: {csv_path}\n"
+                f"Tip: set DRUG_DATASET_PATH env var or ensure the file exists under data/processed/."
+            )
 
-    required = {"drug_id", "generic_name", "generic_name_clean"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
+        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        df.columns = [c.strip() for c in df.columns]
 
-    index: Dict[str, Dict[str, Any]] = {}
-    primary_keys: set[str] = set()
-    all_keys: set[str] = set()
+        required = {"drug_id", "generic_name", "generic_name_clean"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-    for _, row in df.iterrows():
-        row_dict = row.to_dict()
+        index: Dict[str, Dict[str, Any]] = {}
+        primary_keys: set[str] = set()
+        all_keys: set[str] = set()
 
-        gen_clean = normalize_text(row_dict.get("generic_name_clean", ""))
-        gen_name = normalize_text(row_dict.get("generic_name", ""))
+        def _safe_set_key(k: str, row_dict: Dict[str, Any]) -> None:
+            if not k:
+                return
+            existing = index.get(k)
+            if not existing:
+                index[k] = row_dict
+                all_keys.add(k)
+                return
+            if (existing.get("drug_id") or "") == (row_dict.get("drug_id") or ""):
+                all_keys.add(k)
+                return
+            # collision -> skip
+            return
 
-        primary_key = gen_clean or gen_name
-        if not primary_key:
-            continue
+        for _, row in df.iterrows():
+            row_dict = row.to_dict()
 
-        index.setdefault(primary_key, row_dict)
-        primary_keys.add(primary_key)
-        all_keys.add(primary_key)
+            gen_clean = normalize_text(row_dict.get("generic_name_clean", ""))
+            gen_name = normalize_text(row_dict.get("generic_name", ""))
 
-        if gen_name:
-            index.setdefault(gen_name, row_dict)
-            primary_keys.add(gen_name)
-            all_keys.add(gen_name)
-
-        # keep short brand key recall
-        brand_names_norm = normalize_text(row_dict.get("brand_names", ""))
-        if brand_names_norm:
-            short_brand = " ".join(brand_names_norm.split()[:3])
-            if short_brand:
-                index.setdefault(short_brand, row_dict)
-                all_keys.add(short_brand)
-
-    _df = df
-    _index = index
-    _keys_primary = sorted(primary_keys)
-    _keys_all = sorted(all_keys)
-
-    print(f"✅ Loaded {len(df):,} drugs | {len(_keys_all):,} lookup keys")
-    print(f"📄 Dataset path: {os.path.abspath(csv_path)}")
-
-
-# -----------------------------------------------------------------------------
-# HELPERS
-# -----------------------------------------------------------------------------
-def clean_side_effects(row: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    # Keep lightweight cleanup: whitespace + dedupe list items
-    def _clean_list(text: str, max_items: int = 80) -> str:
-        if not text:
-            return ""
-        t = str(text).replace("\r\n", "\n").replace("\r", "\n")
-        t = re.sub(r"\s+", " ", t).strip()
-        if not t:
-            return ""
-
-        parts = [p.strip(" .;") for p in t.split(",") if p.strip()]
-        if not parts:
-            return t
-
-        out: List[str] = []
-        seen: set[str] = set()
-        for p in parts:
-            key = p.lower()
-            if key in seen:
+            primary_key = gen_clean or gen_name
+            if not primary_key:
                 continue
-            seen.add(key)
-            out.append(p)
-            if len(out) >= max_items:
-                break
 
-        return ", ".join(out)
+            _safe_set_key(primary_key, row_dict)
+            primary_keys.add(primary_key)
 
-    buckets = {
-        "common": _clean_list(row.get("common_side_effects", "") or ""),
-        "less_common": _clean_list(row.get("less_common_side_effects", "") or ""),
-        "rare": _clean_list(row.get("rare_side_effects", "") or ""),
-        "postmarketing": _clean_list(row.get("postmarketing_side_effects", "") or ""),
-        "unknown": _clean_list(row.get("unknown_frequency_side_effects", "") or ""),
-    }
-    buckets = {k: v for k, v in buckets.items() if v.strip()}
-    return buckets or None
+            if gen_name:
+                _safe_set_key(gen_name, row_dict)
+                primary_keys.add(gen_name)
+
+            # brand indexing: split + ignore "...(+X more)" suffix
+            raw_brands = _strip_brand_suffix(row_dict.get("brand_names") or "")
+            if raw_brands:
+                brand_parts = [b.strip() for b in raw_brands.split(",") if b.strip()]
+                for b in brand_parts[:10]:
+                    bn = normalize_text(b)
+                    if bn and bn not in {"...", "more"}:
+                        _safe_set_key(bn, row_dict)
+
+        _df = df
+        _index = index
+        _keys_primary = sorted(primary_keys)
+        _keys_all = sorted(all_keys)
+
+        print(f"Loaded {len(df):,} drugs | {len(_keys_all):,} lookup keys")
+        print(f"Dataset path: {os.path.abspath(csv_path)}")
 
 
+# ---------------------------------------------------------------------
+# HELPERS (formatting safety)
+# ---------------------------------------------------------------------
 def normalize_route(route: str) -> str:
-    # Lightweight normalization (should already be clean in CSV, but safe)
     if not route:
         return ""
     s = str(route).strip()
@@ -311,10 +477,10 @@ def normalize_route(route: str) -> str:
 
 
 def trim_brand_names(raw: str, max_items: int = MAX_BRANDS_RETURNED) -> str:
-    # Lightweight trim (CSV should be pre-cleaned, but keep safety)
     if not raw:
         return ""
-    text = str(raw).replace("|", ",").replace(";", ",")
+    raw = _strip_brand_suffix(str(raw))
+    text = raw.replace("|", ",").replace(";", ",")
     parts = [p.strip() for p in text.split(",") if p.strip()]
 
     out: List[str] = []
@@ -334,110 +500,54 @@ def trim_brand_names(raw: str, max_items: int = MAX_BRANDS_RETURNED) -> str:
 
     total_unique = len({re.sub(r"\s+", " ", x).strip().lower() for x in parts if x.strip()})
     remaining = max(0, total_unique - len(out))
-
     if remaining > 0:
         return ", ".join(out) + f", ... (+{remaining} more)"
     return ", ".join(out)
 
 
-def clean_long_text(
-    text: str,
-    *,
-    max_chars: int = 1500,
-    min_line_len: int = 20,
-) -> str:
-    """
-    CSV is pre-cleaned, but we still do TWO important things here:
-
-    1) ✅ Preserve newlines (so FDA sections stay readable in UI)
-    2) ✅ Remove duplicated section labels like:
-         "Liver Warning:\\nLiver Warning This product..." -> "Liver Warning:\\nThis product..."
-
-    Also:
-    - remove stray lines that are only ":" or empty
-    - trim leading punctuation/spaces in lines
-    - hard cap length
-    """
+def clean_long_text(text: str, *, max_chars: int = 1200) -> str:
     if not text:
         return ""
-
     t = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not t:
         return ""
-
-    # If the CSV contains literal "\n" sequences (two chars), convert them to real newlines
     t = t.replace("\\n", "\n")
-
-    # Normalize spaces/tabs but keep newlines
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
-
-    # Remove lines that are only ":" or only punctuation
-    lines = [ln.strip() for ln in t.split("\n")]
-    cleaned_lines: List[str] = []
-    for ln in lines:
-        if not ln:
-            cleaned_lines.append("")  # keep blank lines for paragraph spacing
-            continue
-        if re.fullmatch(r"[:;\-–—•\.\s]+", ln):
-            continue
-        # Trim weird leading punctuation like ": text"
-        ln = re.sub(r"^\s*[:;\-–—•]+\s*", "", ln).strip()
-        if ln:
-            cleaned_lines.append(ln)
-
-    t = "\n".join(cleaned_lines)
-    t = re.sub(r"\n{3,}", "\n\n", t).strip()
-
-    # Remove duplicated section label at the start of the next line after "Label:"
-    # e.g.
-    # Liver Warning:
-    # Liver Warning This product contains ...
-    # ->
-    # Liver Warning:
-    # This product contains ...
-    label_map = [
-        "Liver Warning",
-        "Allergy Alert",
-        "Do not use",
-        "Ask a doctor before use",
-        "Ask a doctor or pharmacist before use",
-        "Stop use and ask a doctor if",
-        "Stop use and ask a doctor",
-    ]
-    for label in sorted(label_map, key=len, reverse=True):
-        # If a line is "LABEL:" then next line starts with "LABEL" again, remove it.
-        pat = rf"(?mi)^(?:{re.escape(label)}:)\s*\n\s*(?:{re.escape(label)}\b[: ]*)"
-        t = re.sub(pat, f"{label}:\n", t)
-
-    # Also remove repeated "Label:" on its own line twice in a row
-    for label in sorted(label_map, key=len, reverse=True):
-        pat2 = rf"(?mi)^(?:{re.escape(label)}:)\s*\n\s*(?:{re.escape(label)}:)\s*$"
-        t = re.sub(pat2, f"{label}:", t)
-
-    # Final: collapse excessive internal spaces again (but keep newlines)
-    t = "\n".join([re.sub(r"[ \t]+", " ", ln).strip() for ln in t.split("\n")]).strip()
-    t = re.sub(r"\n{3,}", "\n\n", t).strip()
-
-    # Safety: drop super-short non-empty lines (noise), but keep blank lines
-    final_lines: List[str] = []
-    for ln in t.split("\n"):
-        if not ln:
-            final_lines.append("")
-            continue
-        if len(ln) < min_line_len and not ln.endswith(":"):
-            # very short line that's not a section header -> drop
-            continue
-        final_lines.append(ln)
-
-    t = "\n".join(final_lines)
-    t = re.sub(r"\n{3,}", "\n\n", t).strip()
-
-    # Hard cap (preserve structure as much as possible)
     if len(t) > max_chars:
         t = t[:max_chars].rstrip() + "…"
-
     return t
+
+
+def clean_side_effects(row: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    def _clean_list(text: str, max_items: int = 80) -> str:
+        if not text:
+            return ""
+        t = re.sub(r"\s+", " ", str(text)).strip()
+        if not t:
+            return ""
+        parts = [p.strip(" .;") for p in t.split(",") if p.strip()]
+        out: List[str] = []
+        seen: set[str] = set()
+        for p in parts:
+            k = p.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(p)
+            if len(out) >= max_items:
+                break
+        return ", ".join(out)
+
+    buckets = {
+        "common": _clean_list(row.get("common_side_effects", "") or ""),
+        "less_common": _clean_list(row.get("less_common_side_effects", "") or ""),
+        "rare": _clean_list(row.get("rare_side_effects", "") or ""),
+        "postmarketing": _clean_list(row.get("postmarketing_side_effects", "") or ""),
+        "unknown": _clean_list(row.get("unknown_frequency_side_effects", "") or ""),
+    }
+    buckets = {k: v for k, v in buckets.items() if v.strip()}
+    return buckets or None
 
 
 def build_match(row: Dict[str, Any], key: str, score: float) -> Dict[str, Any]:
@@ -450,13 +560,10 @@ def build_match(row: Dict[str, Any], key: str, score: float) -> Dict[str, Any]:
         "brand_names": trim_brand_names(row.get("brand_names", "") or ""),
         "drug_class": row.get("drug_class", "") or "",
         "route": normalize_route(row.get("route", "") or ""),
-
-        # ✅ Trust cleaned CSV, but keep safe formatting + caps
-        "indications": clean_long_text(row.get("indications", "")),
-        "dosage_and_administration": clean_long_text(row.get("dosage_and_administration", "")),
-        "warnings": clean_long_text(row.get("warnings", "")),
-        "contraindications": clean_long_text(row.get("contraindications", "")),
-
+        "indications": clean_long_text(row.get("indications", "") or ""),
+        "dosage_and_administration": clean_long_text(row.get("dosage_and_administration", "") or ""),
+        "warnings": clean_long_text(row.get("warnings", "") or ""),
+        "contraindications": clean_long_text(row.get("contraindications", "") or ""),
         "sources": row.get("sources", "") or "",
         "last_updated": row.get("last_updated", "") or "",
     }
@@ -479,11 +586,12 @@ def _clean_suggestion_list(items: List[str], top_k: int) -> List[str]:
     for s in items:
         if not isinstance(s, str):
             continue
-        s2 = normalize_text(s)
-        if not s2 or s2 in seen:
+        display = re.sub(r"\s+", " ", s).strip()
+        key = normalize_text(display)
+        if not key or key in seen:
             continue
-        seen.add(s2)
-        out.append(s2)
+        seen.add(key)
+        out.append(display)
         if len(out) >= top_k:
             break
 
@@ -492,36 +600,34 @@ def _clean_suggestion_list(items: List[str], top_k: int) -> List[str]:
 
 def suggestions_from_pool(results: List[tuple], top_k: int) -> List[str]:
     raw: List[str] = []
-
     for key, score, _ in results:
         if isinstance(key, str) and key in ALIASES:
             raw.append(key)
             continue
-
         row = _index.get(key)
         if not row:
             continue
-
         name = row.get("generic_name_clean") or row.get("generic_name") or key
         raw.append(str(name))
-
     return _clean_suggestion_list(raw, top_k)
 
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # LOOKUP
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def lookup_drug(
     query: str,
     top_k: int = DEFAULT_TOP_K,
     min_score: float = DEFAULT_MIN_SCORE,
+    *,
+    disease: Optional[str] = None,
+    age: Optional[int] = None,
 ) -> Dict[str, Any]:
     if _df is None:
         init_store()
 
-    q_original = query
-    q_norm, used_alias, alias_target = apply_alias_only(query)
-
+    q_original = "" if query is None else str(query)
+    q_norm, used_alias, alias_target = apply_alias_only(q_original)
     base_path = [q_original, q_norm] if q_norm else [q_original]
 
     if not q_norm:
@@ -533,6 +639,8 @@ def lookup_drug(
             suggestions=[],
             match_type="none",
             resolution_path=base_path,
+            disease=disease,
+            age=age,
         )
 
     if q_norm in _index:
@@ -546,20 +654,16 @@ def lookup_drug(
             suggestions=[],
             match_type="exact",
             resolution_path=base_path,
+            disease=disease,
+            age=age,
         )
 
-    # Alias hit (includes typo → acetaminophen)
     if used_alias and alias_target and alias_target in _index:
         row = _index[alias_target]
-
-        alias_cluster = [alias_target]
-        for k, v in ALIASES.items():
-            if v == alias_target:
-                alias_cluster.append(k)
-
+        alias_cluster = [alias_target] + [k for k, v in ALIASES.items() if v == alias_target]
         alias_cluster = _clean_suggestion_list(alias_cluster, top_k)
-        matches = [build_match(row, alias_target, ALIAS_SCORE)]
 
+        matches = [build_match(row, alias_target, ALIAS_SCORE)]
         return make_response(
             query=q_original,
             normalized=alias_target,
@@ -568,6 +672,8 @@ def lookup_drug(
             suggestions=alias_cluster,
             match_type="alias",
             resolution_path=[q_original, q_norm, alias_target],
+            disease=disease,
+            age=age,
         )
 
     results = process.extract(
@@ -587,7 +693,6 @@ def lookup_drug(
             score_cutoff=max(0.0, min_score - 35),
         )
         suggestions = suggestions_from_pool(loose, top_k)
-
         return make_response(
             query=q_original,
             normalized=q_norm,
@@ -596,6 +701,8 @@ def lookup_drug(
             suggestions=suggestions,
             match_type="none",
             resolution_path=base_path,
+            disease=disease,
+            age=age,
         )
 
     matches: List[Dict[str, Any]] = []
@@ -617,23 +724,16 @@ def lookup_drug(
             break
 
     if not matches:
-        loose = process.extract(
-            q_norm,
-            _suggestion_pool(),
-            scorer=fuzz.WRatio,
-            limit=max(top_k, 15),
-            score_cutoff=max(0.0, min_score - 35),
-        )
-        suggestions = suggestions_from_pool(loose, top_k)
-
         return make_response(
             query=q_original,
             normalized=q_norm,
             message="No confident match found",
             matches=[],
-            suggestions=suggestions,
+            suggestions=[],
             match_type="none",
             resolution_path=base_path,
+            disease=disease,
+            age=age,
         )
 
     top_score = float(matches[0].get("score", 0.0))
@@ -658,4 +758,6 @@ def lookup_drug(
         suggestions=suggestions,
         match_type=match_type,
         resolution_path=base_path,
+        disease=disease,
+        age=age,
     )
