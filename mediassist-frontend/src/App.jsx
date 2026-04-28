@@ -104,10 +104,12 @@ async function fetchJson(url, options = {}, timeoutMs = 15000) {
 
 export default function App() {
   const [activeView, setActiveView] = useState("lookup");
-  const [disease, setDisease] = useState(() =>
+  const [disease, _setDisease] = useState(() =>
     normalizeDisease(localStorage.getItem(LS_KEYS.disease)),
   );
-  const [age, setAge] = useState(() => localStorage.getItem(LS_KEYS.age) || "");
+  const [age, _setAge] = useState(
+    () => localStorage.getItem(LS_KEYS.age) || "",
+  );
 
   const [drug, setDrug] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -414,7 +416,7 @@ export default function App() {
           <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
             {contextReady ? "Context ready" : contextMessage}
           </div>
-        </section>
+        )}
 
         <nav className="tabs" aria-label="MediAssist views">
           {[
