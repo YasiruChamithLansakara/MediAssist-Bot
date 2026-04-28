@@ -470,23 +470,24 @@ export default function App() {
           />
         )}
 
-        {activeView === "prescription" && (
-          <PrescriptionView
-            fileInputRef={fileInputRef}
-            uploadFile={uploadFile}
-            previewUrl={previewUrl}
-            loading={ocrLoading}
-            analyzeLoading={ocrAnalyzeLoading}
-            error={ocrError}
-            result={ocrResult}
-            ocrText={ocrText}
-            setOcrText={setOcrText}
-            onFileChange={onFileChange}
-            onUpload={uploadPrescription}
-            onAnalyzeText={analyzeOcrText}
-            onSendToChat={sendDetectedToChat}
-            contextReady={contextReady}
-          />
+        {loading && (
+          <div className="loadingContainer">
+            <div className="spinner"></div>
+            <div className="loadingText">Searching drug database...</div>
+          </div>
+        )}
+
+        {response?.query && !loading && (
+          <div className="apiLine">
+            <span className="muted">API:</span>{" "}
+            <a
+              href={`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+            </a>
+          </div>
         )}
 
         <footer className="footer">
