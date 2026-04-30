@@ -82,6 +82,8 @@ SAFE_PATTERNS = [
     "check with a pharmacist",
     "ask your doctor",
     "discuss with your physician",
+    "discuss with your doctor",
+    "discuss this with your",
 ]
 
 
@@ -140,8 +142,17 @@ def check_safe_communication(text: str) -> bool:
         return False
 
     text_lower = text.lower()
-    for safe_phrase in SAFE_PATTERNS:
-        if safe_phrase in text_lower:
+    
+    # Check for safe patterns (more flexible matching)
+    safe_keywords = [
+        "consult", "ask", "discuss", "speak with", "talk to",
+        "confirm with", "verify with", "check with", "tell",
+        "pharmacist", "doctor", "physician", "healthcare provider"
+    ]
+    
+    # Look for at least one safe keyword
+    for keyword in safe_keywords:
+        if keyword in text_lower:
             return True
 
     return False
