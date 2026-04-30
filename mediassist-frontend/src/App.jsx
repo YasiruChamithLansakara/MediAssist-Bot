@@ -175,6 +175,8 @@ export default function App() {
     );
   }, [lookupResponse]);
 
+  const anyLoading = lookupLoading || chatLoading || ocrLoading || ocrAnalyzeLoading;
+
   const resetLookupToggles = () => {
     setShowBrandsFull(false);
     setOpenSections({
@@ -472,22 +474,22 @@ export default function App() {
           />
         )}
 
-        {loading && (
+        {anyLoading && (
           <div className="loadingContainer">
             <div className="spinner"></div>
             <div className="loadingText">Searching drug database...</div>
           </div>
         )}
 
-        {response?.query && !loading && (
+        {lookupResponse?.query && !anyLoading && (
           <div className="apiLine">
             <span className="muted">API:</span>{" "}
             <a
-              href={`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+              href={`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
               target="_blank"
               rel="noreferrer"
             >
-              {`${API_BASE}/lookup?drug=${encodeURIComponent(response.query)}`}
+              {`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
             </a>
           </div>
         )}
