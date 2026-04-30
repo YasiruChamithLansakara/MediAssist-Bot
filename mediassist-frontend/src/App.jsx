@@ -104,10 +104,10 @@ async function fetchJson(url, options = {}, timeoutMs = 15000) {
 
 export default function App() {
   const [activeView, setActiveView] = useState("lookup");
-  const [disease, _setDisease] = useState(() =>
+  const [disease, setDisease] = useState(() =>
     normalizeDisease(localStorage.getItem(LS_KEYS.disease)),
   );
-  const [age, _setAge] = useState(
+  const [age, setAge] = useState(
     () => localStorage.getItem(LS_KEYS.age) || "",
   );
 
@@ -470,6 +470,25 @@ export default function App() {
             loading={chatLoading}
             error={chatError}
             onSend={() => sendChat()}
+            contextReady={contextReady}
+          />
+        )}
+
+        {activeView === "prescription" && (
+          <PrescriptionView
+            fileInputRef={fileInputRef}
+            uploadFile={uploadFile}
+            previewUrl={previewUrl}
+            loading={ocrLoading}
+            analyzeLoading={ocrAnalyzeLoading}
+            error={ocrError}
+            result={ocrResult}
+            ocrText={ocrText}
+            setOcrText={setOcrText}
+            onFileChange={onFileChange}
+            onUpload={uploadPrescription}
+            onAnalyzeText={analyzeOcrText}
+            onSendToChat={sendDetectedToChat}
             contextReady={contextReady}
           />
         )}
