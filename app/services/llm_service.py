@@ -18,6 +18,13 @@ from typing import Any, Dict, List, Optional, Iterator
 
 logger = logging.getLogger("mediassist.llm")
 
+# Import RAG service
+try:
+    from .rag_vector_search import get_rag_service, is_rag_available
+except ImportError:
+    get_rag_service = None
+    is_rag_available = lambda: False
+
 # Configuration from environment
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()  # "openai" or ""
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
@@ -90,6 +97,7 @@ class LLMService:
         """
         Build context object for LLM generation.
 
+        Optionally enriches context with RAG-retrieved information.
         Returns dict suitable for passing to LLM.
         """
         drug_context = []
@@ -104,13 +112,42 @@ class LLMService:
                     "contraindications": sections.get("contraindications"),
                     "dosage": sections.get("dosage_and_administration"),
                     "indications": sections.get("indications"),
+                    "source": "matched",
                 })
+
+        # Enhance with RAG retrieval if available
+        rag_context = []
+        if is_rag_available and is_rag_available():
+            try:
+                rag_service = get_rag_service()
+                if rag_service and rag_service.is_available():
+                    # Retrieve semantic matches from vector database
+                    query = f"{message} {disease}".strip()
+                    rag_results = rag_service.retrieve_context(query, top_k=3)
+                    
+                    for result in rag_results:
+                        # Avoid duplicates
+                        is_duplicate = any(
+                            d["name"].lower() == result["drug_name"].lower()
+                            for d in drug_context
+                        )
+                        if not is_duplicate:
+                            rag_context.append({
+                                "name": result["drug_name"],
+                                "similarity": result["similarity"],
+                                "metadata": result["metadata"],
+                                "source": "rag",
+                            })
+            except Exception as e:
+                logger.debug(f"RAG enhancement failed: {e}")
 
         return {
             "user_message": message,
             "disease": disease,
             "age": age,
             "drug_information": drug_context,
+            "rag_context": rag_context,
+            "has_rag": len(rag_context) > 0,
             "conversation_turns": min(len(conversation_history), 5),  # Recent turns for context
         }
 
@@ -221,7 +258,10 @@ class LLMService:
             })
 
         # Build user message with drug context
-        drug_section = self._format_drug_context(context.get("drug_information", []))
+        drug_section = self._format_drug_context(
+            context.get("drug_information", []),
+            context.get("rag_context", [])
+        )
         user_content = f"""Patient context: {context.get("disease", "unknown disease")}, age {context.get("age", "?")}
 
 Drug information available:
@@ -235,23 +275,41 @@ Provide an educational explanation based on the drug information above. Remember
 
         return messages
 
-    def _format_drug_context(self, drugs: List[Dict[str, Any]]) -> str:
-        """Format drug information for the LLM prompt."""
-        if not drugs:
-            return "No specific drug information matched."
-
+    def _format_drug_context(self, drugs: List[Dict[str, Any]], rag_context: List[Dict[str, Any]] = None) -> str:
+        """Format drug information for the LLM prompt, including RAG context."""
         parts = []
-        for drug in drugs:
-            name = drug.get("name", "Unknown")
-            confidence = int(drug.get("confidence", 0) * 100)
-            parts.append(f"\n{name} (matched with {confidence}% confidence):")
 
-            if drug.get("warnings"):
-                parts.append(f"  Warnings: {drug['warnings'][:200]}...")
-            if drug.get("contraindications"):
-                parts.append(f"  Contraindications: {drug['contraindications'][:200]}...")
-            if drug.get("dosage"):
-                parts.append(f"  Dosage: {drug['dosage'][:200]}...")
+        # Add directly matched drugs
+        if drugs:
+            parts.append("MATCHED DRUGS:")
+            for drug in drugs:
+                name = drug.get("name", "Unknown")
+                confidence = int(drug.get("confidence", 0) * 100)
+                parts.append(f"\n{name} (matched with {confidence}% confidence):")
+
+                if drug.get("warnings"):
+                    parts.append(f"  Warnings: {drug['warnings'][:200]}...")
+                if drug.get("contraindications"):
+                    parts.append(f"  Contraindications: {drug['contraindications'][:200]}...")
+                if drug.get("dosage"):
+                    parts.append(f"  Dosage: {drug['dosage'][:200]}...")
+
+        # Add RAG-retrieved context for semantic relevance
+        if rag_context:
+            parts.append("\n\nSEMANTICALLY RELATED DRUGS (from knowledge base):")
+            for rag_drug in rag_context:
+                name = rag_drug.get("name", "Unknown")
+                similarity = rag_drug.get("similarity", 0)
+                metadata = rag_drug.get("metadata", {})
+                parts.append(f"\n{name} (similarity: {similarity:.2%}):")
+
+                if metadata.get("indications"):
+                    parts.append(f"  Used for: {metadata['indications'][:150]}...")
+                if metadata.get("warnings"):
+                    parts.append(f"  Warnings: {metadata['warnings'][:150]}...")
+
+        if not parts:
+            parts.append("No specific drug information matched.")
 
         return "\n".join(parts)
 
@@ -284,3 +342,21 @@ def generate_llm_response(
     """Generate a response using LLM."""
     service = get_llm_service()
     return service.generate_response(message, disease, age, matched_drugs, conversation_history)
+
+
+def get_rag_status() -> Dict[str, Any]:
+    """Get RAG service status."""
+    try:
+        if is_rag_available and is_rag_available():
+            rag_service = get_rag_service()
+            if rag_service:
+                return rag_service.get_status()
+    except Exception as e:
+        logger.debug(f"Error getting RAG status: {e}")
+    
+    return {
+        "rag_enabled": False,
+        "provider": None,
+        "dimension": None,
+        "vector_count": 0,
+    }

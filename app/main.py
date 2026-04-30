@@ -41,7 +41,22 @@ from app.services.llm_service import (
     get_llm_service,
     is_llm_available,
     generate_llm_response,
+    get_rag_status,
 )
+
+# Optional RAG service
+try:
+    from app.services.rag_vector_search import (
+        get_rag_service,
+        is_rag_available,
+        vectorize_drug_knowledge,
+    )
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    get_rag_service = None
+    is_rag_available = lambda: False
+    vectorize_drug_knowledge = None
 
 
 # -----------------------------------------------------------------------------
@@ -183,7 +198,39 @@ class SimpleRateLimitMiddleware(BaseHTTPMiddleware):
 # -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize drug lookup store
     init_store()
+    logger.info("Drug lookup store initialized")
+    
+    # Initialize RAG if available
+    if RAG_AVAILABLE and is_rag_available and is_rag_available():
+        try:
+            rag_service = get_rag_service()
+            if rag_service and rag_service.is_available():
+                # Get drug data for vectorization
+                from app.services.drug_lookup import _df, _index
+                
+                if _df is not None and len(_df) > 0:
+                    # Convert dataframe to drug list format
+                    drugs = []
+                    for _, row in _df.iterrows():
+                        drug_entry = {
+                            "name": row.get("brand_name", row.get("generic_name", "Unknown")),
+                            "generic_name": row.get("generic_name", "Unknown"),
+                            "sections": {
+                                "indications": row.get("indications", ""),
+                                "warnings": row.get("warnings", ""),
+                                "contraindications": row.get("contraindications", ""),
+                            },
+                            "disease": row.get("disease_category", ""),
+                        }
+                        drugs.append(drug_entry)
+                    
+                    count = rag_service.vectorize_drugs(drugs)
+                    logger.info(f"RAG vectorization complete: {count} drugs indexed")
+        except Exception as e:
+            logger.warning(f"RAG initialization failed: {e}")
+    
     yield
 
 
@@ -511,8 +558,69 @@ def get_memory_stats(request: Request):
     return {
         "stats": stats,
         "llm_available": is_llm_available(),
+        "rag_status": get_rag_status(),
         "request_id": rid if rid else None,
     }
+
+
+# Returns RAG vector database status
+@api.get("/rag/status")
+def get_rag_db_status(request: Request):
+    """Get RAG vector database status."""
+    rid = getattr(request.state, "request_id", "")
+    return {
+        "rag_status": get_rag_status(),
+        "request_id": rid if rid else None,
+    }
+
+
+# RAG semantic search
+@api.post("/rag/search")
+def rag_search(request: Request, query: str = Query(..., min_length=1, max_length=500), top_k: int = Query(5, ge=1, le=20)):
+    """
+    Perform semantic search on vectorized drug knowledge.
+    
+    Args:
+        query: Search query (drug name, symptom, condition)
+        top_k: Number of results to return
+    """
+    rid = getattr(request.state, "request_id", "")
+    
+    if not (is_rag_available and is_rag_available()):
+        return _err(
+            request,
+            code="rag_unavailable",
+            message="RAG search not available",
+            status_code=503,
+        )
+    
+    try:
+        rag_service = get_rag_service()
+        if not rag_service:
+            return _err(
+                request,
+                code="rag_unavailable",
+                message="RAG service initialization failed",
+                status_code=503,
+            )
+        
+        results = rag_service.retrieve_context(query, top_k=top_k)
+        
+        return {
+            "query": query,
+            "top_k": top_k,
+            "results": results,
+            "count": len(results),
+            "request_id": rid if rid else None,
+        }
+    except Exception as e:
+        logger.error(f"RAG search error: {e}")
+        return _err(
+            request,
+            code="rag_search_error",
+            message=f"RAG search failed: {str(e)}",
+            status_code=500,
+        )
 
 
 app.include_router(api)
