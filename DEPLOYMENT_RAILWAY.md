@@ -12,7 +12,7 @@ MediAssist Bot is designed to deploy seamlessly to Railway. This guide covers al
 
 ## Deployment Architecture
 
-```
+```text
 ┌─────────────┐
 │  Frontend   │  (Static files + Vite)
 │  (React)    │
@@ -65,7 +65,7 @@ railway init
 
 ### 2.2 Via Railway Dashboard
 
-1. Go to https://railway.app
+1. Go to [Railway](https://railway.app)
 2. Click "New Project"
 3. Select "Deploy from GitHub repo"
 4. Authorize and select MediAssist-Bot repository
@@ -146,7 +146,7 @@ railway open
 
 Your backend URL will be something like:
 
-```
+```text
 https://mediassist-bot-prod.railway.app
 ```
 
@@ -162,22 +162,23 @@ npm run build
 
 ### 5.2 Deploy Frontend Separately (Recommended)
 
-**Option A: Railway Static Service**
+#### Option A: Railway Static Service
 
 1. Create new Railway service for static files
 2. Configure to serve `dist/` folder
 3. Add as separate service in Railway
 
-**Option B: Netlify/Vercel**
+#### Option B: Netlify/Vercel
 
 1. Build: `npm run build`
 2. Deploy `dist/` folder to Netlify or Vercel
 3. Configure environment variable:
-   ```
+
+   ```env
    VITE_API_BASE=https://your-railway-backend.railway.app/api
    ```
 
-**Option C: Same Railway Container**
+#### Option C: Same Railway Container
 
 1. Configure railway.toml to serve static files
 2. Add build step: `npm run build` in frontend folder
@@ -193,7 +194,7 @@ railway variables set ALLOWED_ORIGINS=https://your-frontend-url.com
 
 Or via dashboard Variables:
 
-```
+```env
 ALLOWED_ORIGINS=https://your-frontend-railway.railway.app,https://your-frontend-vercel.app
 ```
 
@@ -319,7 +320,7 @@ railway variables set RATE_LIMIT_RPM=60  # Reduce from 120
 
 ### Frontend Env (for frontend build)
 
-```bash
+```env
 # .env.production
 VITE_API_BASE=https://your-railway-backend.railway.app/api
 ```
@@ -375,9 +376,9 @@ railway rollback
 
 ## Support
 
-- Railway docs: https://docs.railway.app
-- Railway support: https://railway.app/support
-- MediAssist issues: Check GitHub issues page
+- Railway docs: [Railway Docs](https://docs.railway.app)
+- Railway support: [Railway Support](https://railway.app/support)
+- MediAssist issues: [MediAssist Issues](https://github.com/your-repo/issues)
 
 ---
 

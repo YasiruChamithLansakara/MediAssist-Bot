@@ -44,14 +44,14 @@ atorvastatin calcium
 acetaminophen
 ```
 
-| Case | OCR Confidence | Medicine Recall | Result |
-|---|---:|---:|---|
-| printed_clean | 0.9547 | 1.0000 | pass |
-| handwritten_like | 0.9389 | 1.0000 | pass |
-| blurry | 0.9350 | 0.6667 | pass |
-| rotated | 0.9567 | 1.0000 | pass |
-| low_light | 0.9539 | 1.0000 | pass |
-| low_resolution | 0.9392 | 1.0000 | pass |
+| Case             | OCR Confidence | Medicine Recall | Result |
+| ---------------- | -------------: | --------------: | -----: |
+| printed_clean    |         0.9547 |          1.0000 |   pass |
+| handwritten_like |         0.9389 |          1.0000 |   pass |
+| blurry           |         0.9350 |          0.6667 |   pass |
+| rotated          |         0.9567 |          1.0000 |   pass |
+| low_light        |         0.9539 |          1.0000 |   pass |
+| low_resolution   |         0.9392 |          1.0000 |   pass |
 
 ## Improvements Made During Validation
 

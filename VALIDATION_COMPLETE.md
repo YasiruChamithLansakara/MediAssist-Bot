@@ -125,6 +125,7 @@ Follow [DEPLOYMENT_RAILWAY.md](DEPLOYMENT_RAILWAY.md) for:
 ### Optional Configurations Available
 
 - Set `LLM_API_KEY` for ChatGPT integration
+- Set `RAG_ENABLED=1` and configure `EMBEDDING_PROVIDER` for semantic search
 - Set `USE_CONVERSATION_PERSISTENCE=1` for database
 - Adjust `RATE_LIMIT_CALLS` for API throttling
 - Set `ALLOWED_ORIGINS` for CORS
@@ -164,26 +165,29 @@ curl -X POST https://your-app.railway.app/api/chat \
 │  - Medical Safety Guard              │
 │  - Drug Lookup Service              │
 │  - Chat Service (Rule + LLM)        │
+│  - RAG Vector Search (Enhanced)     │
 │  - NER (spaCy + Fallback)           │
 │  - Conversation Memory              │
 │  - OCR Processing                   │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│  Data Layer                         │
+│  Data & Knowledge Layer             │
 │  - Drug CSV (5 sources)             │
 │  - Side Effects Database            │
+│  - Vector Database (SQLite)         │
 │  - Optional: SQLite Persistence     │
+│  - Embeddings (OpenAI/Local)        │
 └─────────────────────────────────────┘
 ```
 
 ## 9. Quality Metrics
 
-- **Test Coverage**: 49 comprehensive tests
+- **Test Coverage**: 61 comprehensive tests
 - **Code Quality**: Safety-first architecture
 - **Performance**: Optimized builds (<300KB gzipped)
 - **Reliability**: Graceful degradation for optional features
-- **Scalability**: Stateless backend ready for horizontal scaling
+- **Scalability**: Stateless backend, vector search ready for large datasets
 
 ## 10. Next Steps
 

@@ -77,10 +77,9 @@ class OpenAIEmbedding(EmbeddingBackend):
     def _init_client(self) -> None:
         """Initialize OpenAI client."""
         try:
-            import openai
+            from openai import OpenAI
 
-            openai.api_key = self.api_key
-            self.client = openai
+            self.client = OpenAI(api_key=self.api_key)
             logger.info(f"OpenAI embedding initialized with model {self.model}")
         except ImportError:
             logger.warning("OpenAI library not installed. Embeddings disabled.")
@@ -92,11 +91,11 @@ class OpenAIEmbedding(EmbeddingBackend):
             return None
 
         try:
-            response = self.client.Embedding.create(
+            response = self.client.embeddings.create(
                 input=texts,
                 model=self.model,
             )
-            embeddings = [item["embedding"] for item in response["data"]]
+            embeddings = [item.embedding for item in response.data]
             return np.array(embeddings, dtype=np.float32)
         except Exception as e:
             logger.error(f"OpenAI embedding error: {e}")
@@ -157,6 +156,7 @@ class TFIDFEmbedding(EmbeddingBackend):
 
     def __init__(self):
         self.vectorizer = None
+        self.is_fitted = False
         self._init_vectorizer()
 
     def _init_vectorizer(self) -> None:
@@ -176,13 +176,37 @@ class TFIDFEmbedding(EmbeddingBackend):
             logger.warning("scikit-learn not installed. TF-IDF disabled.")
             self.vectorizer = None
 
+    def fit(self, texts: List[str]) -> bool:
+        """Fit the vectorizer on training data (call once with all drug data)."""
+        if not self.vectorizer or not texts:
+            return False
+        
+        try:
+            self.vectorizer.fit(texts)
+            self.is_fitted = True
+            logger.info(f"TF-IDF vectorizer fitted on {len(texts)} documents")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to fit TF-IDF vectorizer: {e}")
+            return False
+
     def embed(self, texts: List[str]) -> Optional[np.ndarray]:
         """Embed texts using TF-IDF."""
         if not self.vectorizer:
             return None
 
         try:
-            embeddings = self.vectorizer.fit_transform(texts).toarray()
+            if not self.is_fitted:
+                # Fallback: fit on provided texts if not already fitted
+                self.fit(texts)
+            
+            # Use transform() if fitted, otherwise fit_transform()
+            if self.is_fitted:
+                embeddings = self.vectorizer.transform(texts).toarray()
+            else:
+                embeddings = self.vectorizer.fit_transform(texts).toarray()
+                self.is_fitted = True
+            
             return embeddings.astype(np.float32)
         except Exception as e:
             logger.error(f"TF-IDF embedding error: {e}")
@@ -388,7 +412,7 @@ class RAGService:
                 self.embedder = TFIDFEmbedding()
 
             # Initialize vector database
-            if self.embedder and self.embedder.model or EMBEDDING_PROVIDER == "tfidf":
+            if self.embedder and (EMBEDDING_PROVIDER == "tfidf" or getattr(self.embedder, 'model', None)):
                 dim = self.embedder.get_dimension() if self.embedder else 100
                 self.vector_db = VectorDatabase(VECTOR_DB_PATH, dim)
                 self.enabled = True
@@ -418,6 +442,27 @@ class RAGService:
         """
         if not self.enabled or not self.embedder:
             return 0
+
+        # For TF-IDF: fit vectorizer on all drug texts first
+        if EMBEDDING_PROVIDER == "tfidf":
+            try:
+                drug_texts = []
+                for drug in drugs:
+                    drug_name = drug.get("generic_name") or drug.get("name", "Unknown")
+                    text_parts = [drug_name]
+                    
+                    sections = drug.get("sections", {})
+                    if sections.get("indications"):
+                        text_parts.append(f"Used for: {sections['indications'][:200]}")
+                    if sections.get("contraindications"):
+                        text_parts.append(f"Avoid if: {sections['contraindications'][:200]}")
+                    
+                    drug_texts.append(" | ".join(text_parts))
+                
+                # Fit vectorizer on all drug texts
+                self.embedder.fit(drug_texts)
+            except Exception as e:
+                logger.error(f"Failed to fit TF-IDF vectorizer: {e}")
 
         count = 0
         for drug in drugs:

@@ -13,14 +13,13 @@ accelerate
 
 # Medical NER (spaCy)
 # Install model with: python -m spacy download en_core_sci_sm
-spacy>=3.0.0
+# spacy>=3.0.0
 
 # Visualization and research
 matplotlib
-flask
 streamlit
 
 # For RAG and vector search (optional)
-# faiss-cpu
+faiss-cpu>=1.7.0  # For efficient vector similarity search
 # sentence-transformers
 

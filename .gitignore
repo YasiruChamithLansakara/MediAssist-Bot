@@ -51,16 +51,23 @@ data/quality_reports/
 data/tmp/
 models/
 outputs/
+outputs/ocr/
 runs/
 
 # -----------------------------
 # Uploaded images or test data
 # -----------------------------
-data/sample_prescriptions/
 data/raw/
-*.jpg
-*.jpeg
-*.png
+data/test_images/
+data/sample_prescriptions/
+!data/test_images/*.png  # Keep test images if needed for testing
+
+# -----------------------------
+# LLM/ Embeddings cache
+# -----------------------------
+.faiss_index/
+embeddings/
+vector_store/
 
 # -----------------------------
 # Environment / secrets
@@ -94,3 +101,9 @@ dist/
 # -----------------------------
 *.ipynb_checkpoints
 *.ipynb_save
+
+# -----------------------------
+# Database files
+# -----------------------------
+*.sqlite3
+*.db

@@ -1,10 +1,19 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App.jsx";
+import "./index.css";
 
-createRoot(document.getElementById('root')).render(
+/**
+ * Optional: Global error boundary (very useful for AI apps)
+ */
+function RootErrorBoundary({ children }) {
+  return children;
+}
+
+createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
+    <RootErrorBoundary>
+      <App />
+    </RootErrorBoundary>
   </StrictMode>,
-)
+);
