@@ -43,20 +43,8 @@ from app.services.llm_service import (
     generate_llm_response,
     get_rag_status,
 )
-
-# Optional RAG service
-try:
-    from app.services.rag_vector_search import (
-        get_rag_service,
-        is_rag_available,
-        vectorize_drug_knowledge,
-    )
-    RAG_AVAILABLE = True
-except ImportError:
-    RAG_AVAILABLE = False
-    get_rag_service = None
-    is_rag_available = lambda: False
-    vectorize_drug_knowledge = None
+from app.services.ner_service import ner_status
+from app.ml.faiss_store import get_faiss_store
 
 
 # -----------------------------------------------------------------------------
@@ -198,39 +186,32 @@ class SimpleRateLimitMiddleware(BaseHTTPMiddleware):
 # -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize drug lookup store
+    # 1. Drug lookup store (CSV → in-memory index)
     init_store()
     logger.info("Drug lookup store initialized")
-    
-    # Initialize RAG if available
-    if RAG_AVAILABLE and is_rag_available and is_rag_available():
-        try:
-            rag_service = get_rag_service()
-            if rag_service and rag_service.is_available():
-                # Get drug data for vectorization
-                from app.services.drug_lookup import _df, _index
-                
-                if _df is not None and len(_df) > 0:
-                    # Convert dataframe to drug list format
-                    drugs = []
-                    for _, row in _df.iterrows():
-                        drug_entry = {
-                            "name": row.get("brand_name", row.get("generic_name", "Unknown")),
-                            "generic_name": row.get("generic_name", "Unknown"),
-                            "sections": {
-                                "indications": row.get("indications", ""),
-                                "warnings": row.get("warnings", ""),
-                                "contraindications": row.get("contraindications", ""),
-                            },
-                            "disease": row.get("disease_category", ""),
-                        }
-                        drugs.append(drug_entry)
-                    
-                    count = rag_service.vectorize_drugs(drugs)
-                    logger.info(f"RAG vectorization complete: {count} drugs indexed")
-        except Exception as e:
-            logger.warning(f"RAG initialization failed: {e}")
-    
+
+    # 2. FAISS vector index
+    try:
+        from app.services.drug_lookup import _df
+        faiss_store = get_faiss_store()
+
+        # Try loading a previously saved index first (fast path)
+        if faiss_store.load():
+            logger.info("FAISS index loaded from disk (%d drugs)", faiss_store.vector_count())
+        elif _df is not None and len(_df) > 0:
+            # Build index from the drug CSV data
+            drug_records = _df.to_dict("records")
+            count = faiss_store.build(drug_records)
+            if count > 0:
+                faiss_store.save()
+                logger.info("FAISS index built and saved (%d drugs)", count)
+            else:
+                logger.warning("FAISS build returned 0 — check embedding backend")
+        else:
+            logger.warning("Drug dataframe empty — FAISS index not built")
+    except Exception as exc:
+        logger.warning("FAISS initialization failed: %s", exc)
+
     yield
 
 
@@ -313,6 +294,8 @@ def meta():
         "rate_limit": {"enabled": RATE_LIMIT_ENABLED, "rpm": RATE_LIMIT_RPM, "burst": RATE_LIMIT_BURST},
         "features": {"chat": True, "prescription_ocr": True, "lightweight_ner": True},
         "ocr_runtime": ocr_runtime_status(),
+        "ner": ner_status(),
+        "faiss": get_faiss_store().status(),
     }
 
 

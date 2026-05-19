@@ -6,7 +6,8 @@ import shutil
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.services.medication_ner import DOSAGE_RE, FREQUENCY_RE, ROUTE_RE, extract_medication_entities
+from app.services.medication_ner import DOSAGE_RE, FREQUENCY_RE, ROUTE_RE
+from app.services.ner_service import extract_medical_entities
 
 try:
     import pytesseract
@@ -18,6 +19,11 @@ except Exception:  # pragma: no cover
     class UnidentifiedImageError(Exception):
         pass
 
+try:
+    import easyocr
+except Exception:  # pragma: no cover
+    easyocr = None
+
 
 class OCRDependencyError(RuntimeError):
     pass
@@ -25,6 +31,9 @@ class OCRDependencyError(RuntimeError):
 
 class OCRImageError(ValueError):
     pass
+
+
+_easyocr_reader = None
 
 
 def _configure_tesseract() -> None:
@@ -37,6 +46,23 @@ def _configure_tesseract() -> None:
     cmd = os.getenv("TESSERACT_CMD", "").strip()
     if cmd:
         pytesseract.pytesseract.tesseract_cmd = cmd
+
+
+def _easyocr_available() -> bool:
+    return easyocr is not None and Image is not None
+
+
+def _get_easyocr_reader():
+    global _easyocr_reader
+    if not _easyocr_available():
+        return None
+    if _easyocr_reader is not None:
+        return _easyocr_reader
+    try:
+        _easyocr_reader = easyocr.Reader(["en"], gpu=False)
+    except Exception:
+        _easyocr_reader = None
+    return _easyocr_reader
 
 
 def _clean_ocr_text(text: str) -> str:
@@ -83,10 +109,12 @@ def _preprocess_image(image):
 def ocr_runtime_status() -> Dict[str, Any]:
     cmd = os.getenv("TESSERACT_CMD", "").strip()
     executable = cmd or shutil.which("tesseract") or ""
+    easyocr_ready = _get_easyocr_reader() is not None
     return {
         "python_dependencies": pytesseract is not None and Image is not None,
+        "easyocr_available": easyocr_ready,
         "tesseract_cmd": executable or None,
-        "configured": bool(pytesseract is not None and Image is not None and executable),
+        "configured": bool((pytesseract is not None and Image is not None and executable) or easyocr_ready),
     }
 
 
@@ -121,6 +149,36 @@ def _ocr_single_image(image) -> Tuple[str, Optional[float]]:
     return _clean_ocr_text(text), confidence
 
 
+def _easyocr_single_image(image) -> Tuple[str, Optional[float]]:
+    reader = _get_easyocr_reader()
+    if reader is None:
+        return "", None
+
+    try:
+        results = reader.readtext(image, detail=1, paragraph=False)
+    except Exception:
+        return "", None
+
+    lines: List[str] = []
+    confidences: List[float] = []
+    for item in results or []:
+        if not isinstance(item, (list, tuple)) or len(item) < 3:
+            continue
+        text = str(item[1] or "").strip()
+        if text:
+            lines.append(text)
+        try:
+            conf = float(item[2])
+        except (TypeError, ValueError):
+            continue
+        if conf >= 0:
+            confidences.append(conf)
+
+    text = _clean_ocr_text("\n".join(lines))
+    confidence = round(sum(confidences) / len(confidences), 4) if confidences else None
+    return text, confidence
+
+
 def _ocr_candidate_score(text: str, confidence: Optional[float]) -> float:
     medication_signal = 0
     medication_signal += len(DOSAGE_RE.findall(text or "")) * 4
@@ -144,26 +202,35 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float]]:
     tilted. The chosen candidate is the one with the strongest medication-like
     OCR signal, not only the highest raw Tesseract confidence.
     """
-    if pytesseract is None:
-        raise OCRDependencyError("OCR dependency is not installed. Install pytesseract.")
+    if pytesseract is None and not _easyocr_available():
+        raise OCRDependencyError("OCR dependency is not installed. Install pytesseract or easyocr.")
 
-    _configure_tesseract()
     image = _preprocess_image(_open_image(image_bytes))
 
     candidates: List[Tuple[float, str, Optional[float]]] = []
+    _configure_tesseract()
     for angle in (0, -10, 10, -6, 6):
         candidate_image = image
         if angle:
             candidate_image = image.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=255)
-        text, confidence = _ocr_single_image(candidate_image)
-        candidates.append((_ocr_candidate_score(text, confidence), text, confidence))
+        if pytesseract is not None:
+            text, confidence = _ocr_single_image(candidate_image)
+            candidates.append((_ocr_candidate_score(text, confidence), text, confidence))
+
+        easy_text, easy_confidence = _easyocr_single_image(candidate_image)
+        if easy_text:
+            candidates.append((_ocr_candidate_score(easy_text, easy_confidence), easy_text, easy_confidence))
+
+    if not candidates:
+        raise OCRDependencyError("OCR runtime is unavailable. Install pytesseract or easyocr.")
 
     _, best_text, best_confidence = max(candidates, key=lambda item: item[0])
     return best_text, best_confidence
 
 
 def _detected_medicines(text: str, *, disease: str, age: int) -> List[Dict[str, Any]]:
-    entities = extract_medication_entities(text, disease=disease, age=age, max_entities=8, min_confidence=0.80)
+    ner_result = extract_medical_entities(text, disease=disease, age=age, max_drugs=8, min_confidence=0.80)
+    entities = ner_result.get("drugs", [])
     medicines: List[Dict[str, Any]] = []
     for entity in entities:
         if not (entity.get("dosage") or entity.get("frequency") or entity.get("route")):
@@ -172,8 +239,8 @@ def _detected_medicines(text: str, *, disease: str, age: int) -> List[Dict[str, 
             {
                 "query": entity.get("candidate") or entity.get("text"),
                 "text": entity.get("text"),
-                "drug": entity.get("drug"),
-                "normalized": entity.get("normalized"),
+                "drug": entity.get("drug_name") or entity.get("drug") or entity.get("text"),
+                "normalized": entity.get("normalized") or entity.get("drug_name") or entity.get("text"),
                 "confidence": entity.get("confidence"),
                 "best_score": entity.get("best_score"),
                 "dosage": entity.get("dosage"),
@@ -233,7 +300,7 @@ def ocr_prescription_image(
         "detected_medicines": detected,
         "preprocessing": {
             "enabled": True,
-            "method": "pil_upscale_grayscale_autocontrast_sharpen_angle_sweep",
+            "method": "pil_upscale_grayscale_autocontrast_sharpen_angle_sweep_hybrid_tesseract_easyocr",
         },
         "note": "Educational demo only. OCR may be inaccurate. Verify with a pharmacist or doctor.",
     }

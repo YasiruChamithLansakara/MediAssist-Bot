@@ -28,6 +28,7 @@ ALIASES = {
     "panadol": "acetaminophen",
     "tylenol": "acetaminophen",
     "apap": "acetaminophen",
+    "salbutamol": "albuterol",
 }
 ALIAS_SCORE = 95.0
 
@@ -551,6 +552,13 @@ def clean_side_effects(row: Dict[str, Any]) -> Optional[Dict[str, str]]:
 
 
 def build_match(row: Dict[str, Any], key: str, score: float) -> Dict[str, Any]:
+    warnings_raw = row.get("warnings", "") or ""
+    warnings_clean = clean_long_text(warnings_raw)
+    
+    # Fallback: if warnings are empty, indicate data is not available
+    if not warnings_clean or warnings_clean.strip() in ("-", ""):
+        warnings_clean = "[Warnings data not available in dataset. Consult the official FDA label or your pharmacist.]"
+    
     match: Dict[str, Any] = {
         "match": key,
         "score": float(score),
@@ -562,7 +570,7 @@ def build_match(row: Dict[str, Any], key: str, score: float) -> Dict[str, Any]:
         "route": normalize_route(row.get("route", "") or ""),
         "indications": clean_long_text(row.get("indications", "") or ""),
         "dosage_and_administration": clean_long_text(row.get("dosage_and_administration", "") or ""),
-        "warnings": clean_long_text(row.get("warnings", "") or ""),
+        "warnings": warnings_clean,
         "contraindications": clean_long_text(row.get("contraindications", "") or ""),
         "sources": row.get("sources", "") or "",
         "last_updated": row.get("last_updated", "") or "",

@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from app.services.drug_lookup import SUPPORTED_DISEASES, build_context_highlights, lookup_drug, normalize_text
-from app.services.medication_ner_enhanced import extract_medication_entities_enhanced as extract_medication_entities
-from app.services.medication_ner import entity_names
+from app.services.drug_lookup import SUPPORTED_DISEASES, build_context_highlights, lookup_drug, normalize_text, score_to_confidence
+from app.services.ner_service import extract_medical_entities, get_drug_names
 from app.services.medical_safety import (
     MedicalSafetyGuard,
     detect_emergency_symptoms,
@@ -100,37 +99,69 @@ def _build_answer(
             ]
         )
         return "\n".join(lines).strip()
-
     lines.append(f"Question: {message.strip()}")
     lines.append("")
 
+    # Provide a concise, structured safety summary when intent is safety
     for item in matched:
         match = item.get("best_match") or {}
         name = match.get("generic_name_clean") or match.get("generic_name") or item.get("query")
         sections = item.get("sections") or {}
-        lines.append(f"Medicine: {name} (confidence {round(float(item.get('confidence') or 0) * 100)}%)")
+        confidence_pct = round(float(item.get("confidence") or 0) * 100)
 
-        if intent in {"safety", "general", "interaction"}:
-            if sections.get("warnings"):
-                lines.append(f"- Warnings: {sections['warnings']}")
-            if sections.get("contraindications"):
-                lines.append(f"- Contraindications: {sections['contraindications']}")
+        lines.append(f"Medicine: {name} (confidence {confidence_pct}%)")
 
-        if intent in {"dosage", "general"} and sections.get("dosage_and_administration"):
-            lines.append(f"- Dosage information from label: {sections['dosage_and_administration']}")
+        if intent == "safety":
+            # Top-line verdict: conservative summary based on label
+            verdict_lines: List[str] = []
+            # If contraindications mention the disease or relevant keywords
+            contraind = sections.get("contraindications") or ""
+            warnings_txt = sections.get("warnings") or ""
+            dosage_txt = sections.get("dosage_and_administration") or ""
 
-        if intent in {"side_effects", "general"}:
-            side_effects = sections.get("side_effects") or {}
-            common = side_effects.get("common") or side_effects.get("unknown")
-            if common:
-                lines.append(f"- Side effects noted in dataset: {_first_sentences(common, max_chars=280, max_sentences=1)}")
+            # Disease-specific caution
+            disease_lower = (disease or "").lower()
+            if disease_lower and any(k in (contraind + warnings_txt).lower() for k in [disease_lower, "hypertension", "blood pressure", "cardiac", "heart"]):
+                verdict_lines.append(f"- Caution: label contains disease-specific warnings or contraindications relevant to {disease}.")
 
-        if not any(
-            sections.get(key)
-            for key in ["warnings", "contraindications", "dosage_and_administration", "indications"]
-        ):
-            lines.append("- The local dataset has limited label text for this medicine.")
-        lines.append("")
+            # General contraindications/warnings presence
+            if contraind.strip():
+                verdict_lines.append(f"- Contraindications: {_first_sentences(contraind, max_chars=220, max_sentences=2)}")
+            if warnings_txt.strip():
+                verdict_lines.append(f"- Warnings: {_first_sentences(warnings_txt, max_chars=220, max_sentences=2)}")
+
+            # Dosage note
+            if dosage_txt.strip():
+                verdict_lines.append(f"- Dosage note: {_first_sentences(dosage_txt, max_chars=220, max_sentences=1)}")
+
+            if not verdict_lines:
+                verdict_lines.append("- No clear disease-specific contraindications or warnings found in the local label data. Consult your pharmacist for patient-specific advice.")
+
+            lines.extend(verdict_lines)
+
+        else:
+            # Non-safety intents: keep previous behavior
+            if intent in {"safety", "general", "interaction"}:
+                if sections.get("warnings"):
+                    lines.append(f"- Warnings: {sections['warnings']}")
+                if sections.get("contraindications"):
+                    lines.append(f"- Contraindications: {sections['contraindications']}")
+
+            if intent in {"dosage", "general"} and sections.get("dosage_and_administration"):
+                lines.append(f"- Dosage information from label: {sections['dosage_and_administration']}")
+
+            if intent in {"side_effects", "general"}:
+                side_effects = sections.get("side_effects") or {}
+                common = side_effects.get("common") or side_effects.get("unknown")
+                if common:
+                    lines.append(f"- Side effects noted in dataset: {_first_sentences(common, max_chars=280, max_sentences=1)}")
+
+            if not any(
+                sections.get(key)
+                for key in ["warnings", "contraindications", "dosage_and_administration", "indications"]
+            ):
+                lines.append("- The local dataset has limited label text for this medicine.")
+            lines.append("")
 
     context_lines = _format_context_highlights(highlights)
     if context_lines:
@@ -173,8 +204,30 @@ def build_chat_response(
     safety_check = MedicalSafetyGuard.validate_user_intent(message, disease, age)
     
     explicit_drugs = _unique_keep_order(drugs)
-    detected_entities = extract_medication_entities(message, disease=disease, age=age, max_entities=5)
-    detected_names = entity_names(detected_entities)
+
+    # If UI already provided an explicit drug, do not expand queries with NER guesses.
+    # This prevents unrelated matches for short follow-up prompts like
+    # "does this correct dosage?" after selecting one medicine in the UI.
+    if explicit_drugs:
+        detected_entities = {
+            "drugs": [],
+            "diseases": [],
+            "chemicals": [],
+            "context": {"dosage": None, "frequency": None, "route": None},
+            "ner_source": "skipped_explicit_drug",
+            "scispacy_available": None,
+        }
+        detected_names = []
+    else:
+        detected_entities = extract_medical_entities(
+            message,
+            disease=disease,
+            age=age,
+            max_drugs=3,
+            min_confidence=0.9,
+        )
+        detected_names = get_drug_names(detected_entities)
+
     queries = _unique_keep_order(explicit_drugs + detected_names)
     intent = _intent_from_message(message)
 
@@ -184,6 +237,24 @@ def build_chat_response(
     for query in queries[:5]:
         result = lookup_drug(query, disease=disease, age=age, top_k=1)
         best_match = result.get("best_match")
+        # If user provided an explicit drug name, prefer a match whose
+        # normalized generic name contains the normalized query token.
+        if explicit_drugs and result.get("matches"):
+            q_norm = normalize_text(query)
+            if q_norm:
+                for candidate in result.get("matches", []):
+                    cand_name = (candidate.get("generic_name_clean") or candidate.get("generic_name") or "")
+                    if q_norm in normalize_text(cand_name):
+                        best_match = candidate
+                        # set confidence based on the candidate score
+                        try:
+                            candidate_score = float(candidate.get("score") or 0.0)
+                            record_conf = score_to_confidence(candidate_score)
+                        except Exception:
+                            record_conf = result.get("confidence")
+                        # override result objects so downstream uses the preferred match
+                        result = {**result, "best_match": best_match, "confidence": record_conf}
+                        break
         record: Dict[str, Any] = {
             "query": query,
             "status": result.get("status"),

@@ -5,17 +5,25 @@ python-multipart
 pydantic
 
 # Drug lookup and data handling
-numpy
+numpy<2.0
 pandas
 rapidfuzz
 
 # Prescription OCR
 pytesseract
 Pillow
+easyocr
 
 # Utilities
 requests
 python-dotenv
+
+# Medical NER
+scispacy
+
+# Embeddings + FAISS
+sentence-transformers
+faiss-cpu
 
 # Tests
 pytest

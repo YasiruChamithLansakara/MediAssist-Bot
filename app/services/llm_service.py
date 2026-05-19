@@ -18,6 +18,12 @@ from typing import Any, Dict, List, Optional, Iterator
 
 logger = logging.getLogger("mediassist.llm")
 
+# Prefer the new FAISS-backed store; keep the legacy RAG service as fallback.
+try:
+    from app.ml.faiss_store import get_faiss_store
+except ImportError:
+    get_faiss_store = None
+
 # Import RAG service
 try:
     from .rag_vector_search import get_rag_service, is_rag_available
@@ -117,12 +123,37 @@ class LLMService:
 
         # Enhance with RAG retrieval if available
         rag_context = []
-        if is_rag_available and is_rag_available():
+        query = f"{message} {disease}".strip()
+
+        faiss_store = None
+        if get_faiss_store is not None:
+            try:
+                faiss_store = get_faiss_store()
+            except Exception as e:
+                logger.debug(f"FAISS store unavailable: {e}")
+
+        if faiss_store is not None and faiss_store.is_ready():
+            try:
+                faiss_results = faiss_store.search(query, top_k=3)
+                for result in faiss_results:
+                    is_duplicate = any(
+                        d["name"].lower() == result["drug_name"].lower()
+                        for d in drug_context
+                    )
+                    if not is_duplicate:
+                        rag_context.append({
+                            "name": result["drug_name"],
+                            "similarity": result["similarity"],
+                            "metadata": result["metadata"],
+                            "source": "faiss",
+                        })
+            except Exception as e:
+                logger.debug(f"FAISS enhancement failed: {e}")
+        elif is_rag_available and is_rag_available():
             try:
                 rag_service = get_rag_service()
                 if rag_service and rag_service.is_available():
                     # Retrieve semantic matches from vector database
-                    query = f"{message} {disease}".strip()
                     rag_results = rag_service.retrieve_context(query, top_k=3)
                     
                     for result in rag_results:
