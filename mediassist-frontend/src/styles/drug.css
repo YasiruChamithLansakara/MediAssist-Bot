@@ -1,0 +1,213 @@
+/* =========================================
+   DRUG / MEDICAL LOOKUP MODULE STYLES
+   Extracted from App.css
+   ========================================= */
+
+/* -------- Main Suggestion Grid -------- */
+.suggestGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* -------- Suggestion Button / Item -------- */
+.suggestButton {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.suggestButton:hover {
+  background: var(--surface-soft);
+}
+
+/* -------- Match Badge -------- */
+.matchBadge {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.matchBadge.good {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.matchBadge.medium {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.matchBadge.low {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+/* -------- Highlight Information Box -------- */
+.highlightBox {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  margin-top: 10px;
+}
+
+/* -------- Section Headers -------- */
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+/* -------- Side Effect Grid -------- */
+.sideEffectGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Individual side effect tag */
+.sideEffectItem {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--blue-soft);
+  color: var(--blue-text);
+}
+
+/* -------- Severity Levels -------- */
+.sideEffectItem.high {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.sideEffectItem.medium {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.sideEffectItem.low {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+/* -------- Accordion (Indications / Warnings) -------- */
+.accordion {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 10px;
+  background: #fff;
+}
+
+.accordionHeader {
+  padding: 10px 12px;
+  cursor: pointer;
+  background: var(--surface-soft);
+  font-weight: 500;
+}
+
+.accordionContent {
+  padding: 12px;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* -------- Info Items (label-value pairs) -------- */
+.infoItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.infoItem:last-child {
+  border-bottom: none;
+}
+
+.infoLabel {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.infoValue {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* -------- Drug Header Card -------- */
+.drugHeader {
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  margin-bottom: 12px;
+}
+
+/* Drug name */
+.drugName {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Drug class */
+.drugClass {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* -------- Warning Box -------- */
+.warningBox {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--red-soft);
+  color: var(--red-text);
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* -------- Confidence Indicator -------- */
+.confidenceBar {
+  height: 6px;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.confidenceFill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.confidenceFill.high {
+  background: var(--confidence-high);
+}
+
+.confidenceFill.medium {
+  background: var(--confidence-medium);
+}
+
+.confidenceFill.low {
+  background: var(--confidence-low);
+}
+
+/* -------- Tooltip Style Info -------- */
+.tooltip {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}

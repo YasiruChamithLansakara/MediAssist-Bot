@@ -11,7 +11,7 @@ This module enforces strict safety boundaries:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Emergency symptoms that require immediate care
 EMERGENCY_SYMPTOMS = {
@@ -248,7 +248,7 @@ class MedicalSafetyGuard:
         return answer.rstrip() + footer
 
     @staticmethod
-    def validate_user_intent(message: str, disease: str, age: int) -> Dict[str, any]:
+    def validate_user_intent(message: str, disease: str, age: int) -> Dict[str, Any]:
         """
         Validates user intent and returns safety analysis.
 
@@ -288,7 +288,7 @@ def get_safety_notice() -> str:
     return MedicalSafetyGuard.enhance_safety_notice()
 
 
-def validate_input(message: str, disease: str, age: int) -> Dict[str, any]:
+def validate_input(message: str, disease: str, age: int) -> Dict[str, Any]:
     """Validate user input for safety."""
     return MedicalSafetyGuard.validate_user_intent(message, disease, age)
 

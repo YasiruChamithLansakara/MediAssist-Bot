@@ -1,0 +1,91 @@
+/* =========================================
+   DESIGN TOKENS (MediAssist UI System)
+   Central color + spacing + shadow system
+   ========================================= */
+
+:root {
+  /* ---------------------------------------
+     CORE BACKGROUND COLORS
+     --------------------------------------- */
+  --bg: #eef2f5;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fb;
+
+  /* ---------------------------------------
+     TEXT COLORS
+     --------------------------------------- */
+  --text: #17202a;
+  --muted: #657080;
+
+  /* ---------------------------------------
+     BORDER SYSTEM
+     --------------------------------------- */
+  --border: #d9e1e8;
+
+  /* ---------------------------------------
+     PRIMARY BRAND COLORS
+     --------------------------------------- */
+  --primary: #166f7a;
+  --primary-dark: #0f5660;
+  --primary-soft: #e3f4f6;
+
+  /* ---------------------------------------
+     SECONDARY UI COLORS
+     --------------------------------------- */
+  --blue-soft: #edf5ff;
+  --blue-text: #214d79;
+
+  --green-soft: #eaf8ef;
+  --green-text: #17643a;
+
+  --amber-soft: #fff6df;
+  --amber-text: #80570b;
+
+  --red-soft: #fff0f0;
+  --red-text: #9a1b1b;
+
+  /* ---------------------------------------
+     SHADOW SYSTEM
+     --------------------------------------- */
+  --shadow: 0 12px 30px rgba(18, 38, 63, 0.08);
+
+  /* ---------------------------------------
+     CONFIDENCE COLORS (AI/OCR SYSTEM)
+     --------------------------------------- */
+  --confidence-high: #059669;
+  --confidence-medium: #d97706;
+  --confidence-low: #dc2626;
+
+  /* ---------------------------------------
+     TYPOGRAPHY SCALE (OPTIONAL FUTURE USE)
+     --------------------------------------- */
+  --font-small: 12px;
+  --font-base: 14px;
+  --font-medium: 16px;
+  --font-large: 20px;
+  --font-xlarge: 24px;
+
+  /* ---------------------------------------
+     SPACING SYSTEM (OPTIONAL UTILITY)
+     --------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* ---------------------------------------
+     BORDER RADIUS SYSTEM
+     --------------------------------------- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  /* ---------------------------------------
+     TRANSITIONS (UI SMOOTHNESS)
+     --------------------------------------- */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.35s ease;
+}
