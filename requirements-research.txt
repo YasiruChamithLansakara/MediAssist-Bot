@@ -1,0 +1,26 @@
+# Optional notebooks / research dependencies.
+# Keep these out of Railway production builds unless you really need them.
+
+# Advanced OCR and image processing
+opencv-python
+easyocr
+
+# NLP and transformers
+transformers
+torch
+sentencepiece
+accelerate
+
+# Medical NER (spaCy)
+# Install model with: python -m spacy download en_core_sci_sm
+spacy>=3.0.0
+
+# Visualization and research
+matplotlib
+flask
+streamlit
+
+# For RAG and vector search (optional)
+# faiss-cpu
+# sentence-transformers
+

@@ -1,40 +1,30 @@
-# -----------------------------
-# Core Python Libraries
-# -----------------------------
-numpy
-pandas
+# Production API dependencies
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
 
-# -----------------------------
-# Image Processing & OCR
-# -----------------------------
-opencv-python
+# Drug lookup and data handling
+numpy<2.0
+pandas
+rapidfuzz
+
+# Prescription OCR
 pytesseract
 Pillow
 easyocr
 
-# -----------------------------
-# NLP and AI Models
-# -----------------------------
-transformers
-torch
-sentencepiece
-accelerate
-spacy
-
-# -----------------------------
-# Web and API Requests
-# -----------------------------
+# Utilities
 requests
-flask
-streamlit
 python-dotenv
 
-# -----------------------------
-# Utilities and Tools
-# -----------------------------
-matplotlib
+# Medical NER
+scispacy
 
-# -----------------------------
-# Testing
-# -----------------------------
+# Embeddings + FAISS
+sentence-transformers
+faiss-cpu
+
+# Tests
 pytest
+httpx
