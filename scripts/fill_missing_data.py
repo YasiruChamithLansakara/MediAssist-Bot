@@ -388,18 +388,21 @@ def apply_llm_fills(
     api_key: str,
     model: str = "llama-3.1-8b-instant",
     max_rows: int = 300,
-    delay: float = 0.5,
+    delay: float = 2.0,
+    output_path: Optional[str] = None,
+    save_interval: int = 25,
 ) -> pd.DataFrame:
     """
     Pass 2 — use LLM to fill remaining null fields.
 
     Args:
-        df:       DataFrame (after rule fills)
-        api_key:  Groq API key
-        model:    Groq model name
-        max_rows: Safety cap — don't process more than N rows per run
-                  (Groq free tier: 30 RPM / 14,400 RPD)
-        delay:    Seconds between API calls (rate limit safety)
+        df:            DataFrame (after rule fills)
+        api_key:       Groq API key
+        model:         Groq model name
+        max_rows:      Safety cap (Groq free tier: 30 RPM / 14,400 RPD)
+        delay:         Seconds between API calls  (2.0 = safe for free tier)
+        output_path:   If set, save a checkpoint every `save_interval` rows
+        save_interval: How often to checkpoint (default every 25 processed rows)
     """
     df = df.copy()
     processed = 0
@@ -424,7 +427,6 @@ def apply_llm_fills(
             continue
 
         row_needs_fill = any(_is_empty(row.get(f)) for f in FILL_PROMPTS)
-
         if not row_needs_fill:
             continue
 
@@ -442,7 +444,12 @@ def apply_llm_fills(
                 filled[field] += 1
                 log.debug("Filled %s[%s] = %s…", field, name, answer[:60])
 
-            time.sleep(delay)  # gentle rate limiting
+            time.sleep(delay)  # rate limit safety (free tier: 30 RPM)
+
+        # ── Checkpoint save ──────────────────────────────────────────────
+        if output_path and processed % save_interval == 0:
+            df.to_csv(output_path, index=False)
+            log.info("✓ Checkpoint saved at row %d → %s", processed, output_path)
 
     log.info("LLM fills completed (processed %d rows):", processed)
     for field, count in filled.items():
@@ -459,14 +466,15 @@ def main():
     parser = argparse.ArgumentParser(
         description="Hybrid data enrichment for MediAssist drug knowledge base"
     )
-    parser.add_argument("--dry-run",    action="store_true", help="Analyse gaps only, no writes")
-    parser.add_argument("--llm",        action="store_true", help="Fill nulls with LLM (requires LLM_API_KEY)")
-    parser.add_argument("--rules-only", action="store_true", help="Apply rule-based fills only")
-    parser.add_argument("--max-rows",   type=int, default=300,  help="Max rows for LLM fills (default 300)")
-    parser.add_argument("--delay",      type=float, default=0.5, help="Delay between LLM calls in seconds")
-    parser.add_argument("--model",      type=str, default="llama-3.1-8b-instant", help="Groq model name")
-    parser.add_argument("--input",      type=str, default=str(INPUT_CSV),  help="Input CSV path")
-    parser.add_argument("--output",     type=str, default=str(OUTPUT_CSV), help="Output CSV path")
+    parser.add_argument("--dry-run",       action="store_true", help="Analyse gaps only, no writes")
+    parser.add_argument("--llm",           action="store_true", help="Fill nulls with LLM (requires LLM_API_KEY)")
+    parser.add_argument("--rules-only",    action="store_true", help="Apply rule-based fills only")
+    parser.add_argument("--max-rows",      type=int,   default=300,  help="Max rows for LLM fills (default 300)")
+    parser.add_argument("--delay",         type=float, default=2.0,  help="Delay between LLM calls in seconds (default 2.0 for free tier)")
+    parser.add_argument("--save-interval", type=int,   default=25,   help="Checkpoint save every N processed rows (default 25)")
+    parser.add_argument("--model",         type=str,   default="llama-3.1-8b-instant", help="Groq model name")
+    parser.add_argument("--input",         type=str,   default=str(INPUT_CSV),  help="Input CSV path")
+    parser.add_argument("--output",        type=str,   default=str(OUTPUT_CSV), help="Output CSV path")
     args = parser.parse_args()
 
     # ── Load data ──────────────────────────────────────────────────────────
@@ -510,12 +518,19 @@ def main():
             df = apply_rule_fills(df)
 
         log.info("\n=== Pass 2: LLM fills (Groq/%s) ===", args.model)
+        log.info(
+            "  Rate limit note: free tier ~30 RPM. "
+            "Saving checkpoint every %d rows to %s",
+            args.save_interval, args.output,
+        )
         df = apply_llm_fills(
             df,
             api_key=api_key,
             model=args.model,
             max_rows=args.max_rows,
             delay=args.delay,
+            output_path=args.output,
+            save_interval=args.save_interval,
         )
 
     # ── Post-validation summary ────────────────────────────────────────────
