@@ -49,10 +49,26 @@ Thumbs.db
 # -----------------------------
 data/quality_reports/
 data/tmp/
-models/
 outputs/
 outputs/ocr/
 runs/
+
+# Generated FAISS binary index (rebuild from dataset on startup)
+data/faiss_index/
+
+# Generated enriched dataset (produced by fill_missing_data.py)
+data/processed/drug_knowledge_enriched.csv
+
+# ML model weights/binaries (large files — download separately)
+# Keep directory structure with .gitkeep placeholders
+models/**/*.bin
+models/**/*.pkl
+models/**/*.pt
+models/**/*.pth
+models/**/*.safetensors
+models/**/*.onnx
+# Exception: keep .gitkeep so empty dirs are tracked in git
+!models/**/.gitkeep
 
 # -----------------------------
 # Uploaded images or test data
@@ -63,11 +79,14 @@ data/sample_prescriptions/
 !data/test_images/*.png  # Keep test images if needed for testing
 
 # -----------------------------
-# LLM/ Embeddings cache
+# LLM / Embeddings cache
 # -----------------------------
-.faiss_index/
+# Note: data/faiss_index/ is covered in the Data section above
 embeddings/
 vector_store/
+# run-logs keep their directory but not the log files themselves
+run-logs/*.log
+run-logs/*.txt
 
 # -----------------------------
 # Environment / secrets
