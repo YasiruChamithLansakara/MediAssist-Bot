@@ -66,30 +66,65 @@ _DEFAULT_MODELS: Dict[str, str] = {
 LLM_MODEL = os.getenv("LLM_MODEL", _DEFAULT_MODELS.get(LLM_PROVIDER, "llama-3.1-8b-instant"))
 
 # ── PROMPTS ──────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are MediAssist, an educational AI assistant helping patients understand \
-their prescriptions and medications for chronic diseases.
+SYSTEM_PROMPT = """You are MediAssist, an educational AI assistant that helps chronic disease \
+patients understand their prescriptions and medications.
 
 STRICT RULES:
-1. You provide EDUCATIONAL information only — never personal medical advice.
-2. Base your answers ONLY on the drug information provided in the context.
-3. Always include a clear disclaimer that the user should consult their doctor/pharmacist.
-4. If you see emergency symptoms (chest pain, difficulty breathing, loss of consciousness), \
-immediately direct the user to call emergency services.
-5. Use simple, patient-friendly language — avoid excessive medical jargon.
-6. Be concise and structured (use bullet points or numbered steps when helpful).
-7. NEVER say "you should take", "this is safe for you", or make dosage decisions.
-8. If the question is outside your drug context, say so honestly.
+1. EDUCATIONAL ONLY — never give personal medical advice or make clinical decisions.
+2. Base answers ONLY on the drug information provided in the context below.
+3. Always end with a disclaimer to consult a doctor or pharmacist.
+4. EMERGENCY: if the user mentions chest pain, difficulty breathing, severe bleeding, or \
+loss of consciousness — immediately tell them to call emergency services and stop.
+5. Use plain, patient-friendly language. Avoid jargon; if you must use a medical term, \
+explain it in brackets.
+6. Adapt tone for age: simpler sentences for patients 65+, more detail for younger adults.
+7. NEVER say "you should take X mg", "this is safe for you", or prescribe doses.
+8. If drug data is missing or thin, say "I don't have enough data on this" rather than guessing.
+9. Keep responses concise — 3 to 5 short bullet points is ideal.
 
-Your output format for medication questions:
-• What this medicine is / what it treats
-• Key warnings or precautions (if any)
-• Common side effects (if data available)
-• Reminder to verify with a healthcare professional"""
+RESPONSE FORMAT:
+**[Drug name]**
+• What it's for: …
+• Key warning(s): …
+• Common side effects: …
+• ⚕️ Always confirm with your doctor or pharmacist before making any changes."""
 
 MEDICAL_DISCLAIMER = (
-    "\n\n⚕️ *Disclaimer: This is educational information only and NOT medical advice. "
+    "\n\n⚕️ *This is educational information only — not medical advice. "
     "Always consult your doctor or pharmacist before making any medication decisions.*"
 )
+
+# Keywords that indicate the LLM already included a disclaimer (avoid doubling up)
+_DISCLAIMER_SIGNALS = (
+    "not medical advice", "educational", "consult your doctor",
+    "consult your pharmacist", "healthcare provider", "healthcare professional",
+    "speak to your", "talk to your", "always verify",
+)
+
+# Intent-specific focus instructions injected into each user turn
+_INTENT_FOCUS: Dict[str, str] = {
+    "dosage": (
+        "Focus on: how and when to take this medication, the usual dose range, "
+        "whether to take it with food, and what to do if a dose is missed. "
+        "Do NOT specify a personalised dose — that is for the prescriber."
+    ),
+    "side_effects": (
+        "Focus on: common side effects patients should expect, serious adverse "
+        "reactions that need urgent attention, and which side effects usually resolve on their own."
+    ),
+    "safety": (
+        "Focus on: important warnings, which patients should NOT take this drug "
+        "(contraindications), and key precautions for the patient's disease context."
+    ),
+    "interaction": (
+        "Focus on: known drug interactions, foods or substances to avoid while taking "
+        "this medication, and signs of a dangerous interaction."
+    ),
+    "general": (
+        "Give a balanced overview: what the drug treats, the most important warning, "
+        "and the most common side effect."
+    ),
+}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -449,23 +484,28 @@ class LLMService:
     ) -> List[Dict[str, str]]:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        # Last 3 conversation turns for context window efficiency
+        # Last 3 conversation turns (text only — no embedded data objects)
         for turn in conversation_history[-3:]:
-            messages.append({
-                "role":    turn.get("role", "user"),
-                "content": str(turn.get("text", "")),
-            })
+            role = turn.get("role", "user")
+            text = str(turn.get("text", "")).strip()
+            if text:
+                messages.append({"role": role, "content": text})
 
         drug_section = self._format_drug_context(
             context.get("drug_information", []),
             context.get("rag_context", []),
         )
 
+        intent = context.get("intent", "general")
+        focus  = _INTENT_FOCUS.get(intent, _INTENT_FOCUS["general"])
+        age    = context.get("age", "?")
+        age_note = " (use simpler language)" if isinstance(age, int) and age >= 65 else ""
+
         user_content = (
-            f"Patient context: {context.get('disease', 'unknown')} patient, age {context.get('age', '?')}\n\n"
-            f"Available drug information:\n{drug_section}\n\n"
-            f"Patient question: {context.get('user_message', '')}\n\n"
-            "Provide a clear, educational explanation based only on the drug information above."
+            f"Patient: {context.get('disease', 'unknown condition')} patient, age {age}{age_note}\n\n"
+            f"Drug information from database:\n{drug_section}\n\n"
+            f"Question: {context.get('user_message', '')}\n\n"
+            f"Focus: {focus}"
         )
         messages.append({"role": "user", "content": user_content})
         return messages
@@ -520,6 +560,7 @@ class LLMService:
         age: int,
         matched_drugs: List[Dict[str, Any]],
         conversation_history: List[Dict[str, Any]],
+        intent: str = "general",
     ) -> Optional[str]:
         """
         Generate an LLM response grounded in drug data.
@@ -529,15 +570,18 @@ class LLMService:
             return None
 
         try:
-            context  = self.build_context_for_llm(
+            context = self.build_context_for_llm(
                 message, disease, age, matched_drugs, conversation_history
             )
+            context["intent"] = intent  # pass detected intent for focused prompting
+
             messages = self._build_messages(context, conversation_history)
             answer   = self._backend.generate(messages)
 
             if answer:
-                # Ensure disclaimer is present
-                if "not medical advice" not in answer.lower() and "disclaimer" not in answer.lower():
+                # Safety net: append disclaimer only if LLM omitted it entirely
+                answer_lower = answer.lower()
+                if not any(sig in answer_lower for sig in _DISCLAIMER_SIGNALS):
                     answer += MEDICAL_DISCLAIMER
             return answer
 
@@ -590,9 +634,10 @@ def generate_llm_response(
     age: int,
     matched_drugs: List[Dict[str, Any]],
     conversation_history: List[Dict[str, Any]],
+    intent: str = "general",
 ) -> Optional[str]:
     return get_llm_service().generate_response(
-        message, disease, age, matched_drugs, conversation_history
+        message, disease, age, matched_drugs, conversation_history, intent=intent
     )
 
 

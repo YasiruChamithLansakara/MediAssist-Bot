@@ -437,6 +437,7 @@ def chat(request: Request, payload: ChatRequest):
             age=int(payload.age),
             matched_drugs=matched_drugs,
             conversation_history=conversation_history,
+            intent=response.get("intent", "general"),
         )
 
         if llm_response:
