@@ -198,7 +198,7 @@ def ocr_runtime_status() -> Dict[str, Any]:
     }
 
 
-_TESS_CONFIG = "--psm 6 --oem 3"  # uniform block of text, LSTM engine
+_TESS_CONFIG = "--oem 3"  # LSTM engine, auto page segmentation (PSM 3 default)
 
 
 def _ocr_single_image(image) -> Tuple[str, Optional[float]]:
@@ -264,19 +264,47 @@ def _easyocr_single_image(image) -> Tuple[str, Optional[float]]:
     return text, confidence
 
 
-def _ocr_candidate_score(text: str, confidence: Optional[float]) -> float:
-    medication_signal = 0
-    medication_signal += len(DOSAGE_RE.findall(text or "")) * 4
-    medication_signal += len(FREQUENCY_RE.findall(text or "")) * 2
-    medication_signal += len(ROUTE_RE.findall(text or "")) * 2
+_MEDICAL_VOCAB_RE = re.compile(
+    r"\b(mg|ml|mcg|tablet|tab|cap|capsule|dose|oral|dosage|twice|daily|bd|tds|od|"
+    r"rx|refill|dispense|solution|inj|injection|apply|topical|drops|syrup|"
+    r"morning|night|week|days|hours|prn|sos|stat|qid|bid|po)\b",
+    re.IGNORECASE,
+)
+_NOISE_RE = re.compile(r"[^A-Za-z0-9\s.,:/\-\(\)%]")  # non-prescription characters
 
-    useful_words = len(re.findall(r"[A-Za-z]{4,}", text or ""))
+
+def _ocr_candidate_score(text: str, confidence: Optional[float]) -> float:
+    t = text or ""
+
+    # Prescription-specific signals (highest weight)
+    medication_signal = (
+        len(DOSAGE_RE.findall(t)) * 4
+        + len(FREQUENCY_RE.findall(t)) * 2
+        + len(ROUTE_RE.findall(t)) * 2
+        + len(_MEDICAL_VOCAB_RE.findall(t)) * 1
+    )
+
+    # Structured lines that look like prescription entries
     line_bonus = sum(
         1
-        for line in (text or "").splitlines()
+        for line in t.splitlines()
         if DOSAGE_RE.search(line) or FREQUENCY_RE.search(line) or ROUTE_RE.search(line)
     )
-    return float(confidence or 0.0) + medication_signal + line_bonus + min(useful_words / 30.0, 3.0)
+
+    # General text density (capped — prevents logos/letterheads dominating)
+    useful_words = len(re.findall(r"[A-Za-z]{4,}", t))
+
+    # Noise penalty: symbols like \, >, |, @ typical in logo/stamp false-positives
+    noise_chars = len(_NOISE_RE.findall(t))
+    noise_penalty = min(noise_chars / 20.0, 2.0)
+
+    return (
+        float(confidence or 0.0)
+        + medication_signal
+        + line_bonus
+        + min(useful_words / 30.0, 2.0)  # capped lower than before
+        - noise_penalty
+    )
 
 
 def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Optional[str]]:
@@ -303,8 +331,9 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Opti
 
     candidates: List[Tuple[float, str, Optional[float], Optional[str]]] = []
 
-    # ── Tesseract angle sweep (binarized image) ───────────────────────────
+    # ── Tesseract candidates ──────────────────────────────────────────────
     if pytesseract is not None:
+        # Angle sweep at default config (PSM 3 auto layout — best for most prescriptions)
         for angle in (0, -10, 10, -6, 6):
             candidate_image = (
                 tess_image
@@ -320,6 +349,25 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Opti
             candidates.append(
                 (_ocr_candidate_score(text, confidence), text, confidence, "tesseract")
             )
+
+        # Extra candidate: PSM 11 (sparse text) at 0° — handles complex multi-zone
+        # forms (stamps, multi-column, handwritten annotations) better than PSM 3
+        try:
+            text11, conf11 = pytesseract.image_to_string(
+                tess_image, config="--psm 11 --oem 3"
+            ), None
+            data11 = pytesseract.image_to_data(
+                tess_image, config="--psm 11 --oem 3",
+                output_type=pytesseract.Output.DICT,
+            )
+            vals = [float(v) for v in data11.get("conf", []) if float(v) >= 40]
+            conf11 = round(sum(vals) / len(vals) / 100.0, 4) if vals else None
+            text11 = _clean_ocr_text(text11)
+            candidates.append(
+                (_ocr_candidate_score(text11, conf11), text11, conf11, "tesseract-sparse")
+            )
+        except Exception:
+            pass
 
     # ── EasyOCR — grayscale image, no binarization ────────────────────────
     if _easyocr_available():
