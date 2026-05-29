@@ -74,20 +74,44 @@ _DISEASE_KEYWORDS = {
 # ── Regex patterns ────────────────────────────────────────────────────────
 
 DOSAGE_RE = re.compile(
-    r"\b\d+(?:\.\d+)?\s*(?:mg|g|mcg|ug|ml|l|iu|units?|%)\b",
+    r"\b\d+(?:\.\d+)?\s*(?:mg|g|mcg|ug|ml|l|iu|meq|units?|mEq|%)"
+    r"(?:/\s*(?:\d+\s*)?(?:mg|g|mcg|ml|l|kg|dose|tab))?\b",
     re.IGNORECASE,
 )
 FREQUENCY_RE = re.compile(
-    r"\b(?:once|twice|daily|nightly|morning|evening|weekly|monthly|"
-    r"od|bd|bid|tds|tid|qid|qhs|qam|qpm|stat|prn|as\s+needed|"
-    r"every\s+\d+\s*(?:hours?|hrs?|days?)|before\s+meals?|after\s+meals?|with\s+food)\b",
+    r"\b(?:once|twice|daily|nightly|morning|evening|weekly|monthly|nocte|mane|"
+    r"od|bd|bid|tds|tid|qid|qhs|qam|qpm|stat|prn|sos|as\s+needed|"
+    r"every\s+\d+\s*(?:hours?|hrs?|days?)|before\s+meals?|after\s+meals?|with\s+food|"
+    r"[xX]\s*\d+\s*(?:days?|weeks?|doses?)|"        # x 5 days, x 3 doses
+    r"[Dd](?:ay)?\s*\d+(?:\s*[-–]\s*[Dd](?:ay)?\s*\d+)?|"  # D1, Day 1, D1-D4
+    r"q\.?d\.?|b\.?i\.?d\.?|t\.?i\.?d\.?|q\.?i\.?d\.?)\b",  # q.d. b.i.d. etc.
     re.IGNORECASE,
 )
 ROUTE_RE = re.compile(
-    r"\b(?:oral|orally|by\s+mouth|po|iv|intravenous(?:ly)?|im|intramuscular(?:ly)?|"
-    r"sc|subcutaneous(?:ly)?|topical(?:ly)?|inhaled|inhalation|nasal|ophthalmic|otic)\b",
+    r"\b(?:oral|orally|by\s+mouth|po|p\.o\.?|"
+    r"iv|i\.v\.?|intravenous(?:ly)?|im|i\.m\.?|intramuscular(?:ly)?|"
+    r"sc|s\.c\.?|subcutaneous(?:ly)?|subcut|"
+    r"topical(?:ly)?|inhaled|inhalation|nasal|ophthalmic|otic|"
+    r"sublingual|transdermal|rectal|nebulisation)\b",
     re.IGNORECASE,
 )
+
+# Prescription shorthand prefixes — stripped before candidate extraction
+# e.g. "T. Metformin", "Inj. Xgeva", "Cap. Amoxicillin", "Syr. Paracetamol"
+_PRESCRIPTION_PREFIX_RE = re.compile(
+    r"(?:^|\s)(?:T|Tab|Tabs|Cap|Caps|Inj|Syr|Sol|Oint|Cr|Supp|Drops?|Dr)"
+    r"\.?\s+",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _clean_prescription_text(text: str) -> str:
+    """Strip common prescription shorthands that break drug name extraction."""
+    text = _PRESCRIPTION_PREFIX_RE.sub(" ", text or "")
+    # Split word-digit run-ons from OCR: "Metformin500mg" → "Metformin 500mg"
+    # Only when there are 3+ letters (avoids breaking "D2", "B12", "T3")
+    text = re.sub(r"([A-Za-z]{3,})(\d)", r"\1 \2", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 # Minimum character length for a candidate to be considered a drug name
 _MIN_DRUG_LEN = 4
@@ -245,23 +269,31 @@ def extract_medication_entities(
     disease: str,
     age: int,
     max_entities: int = 5,
-    min_confidence: float = 0.84,
+    min_confidence: float = 0.78,
 ) -> List[Dict[str, Any]]:
     """
-    Lightweight rule-based medication extraction.
+    OCR-path medication extraction.
 
-    This is intentionally small and deterministic for the project demo:
-    - split prescription/chat text into likely medication segments
-    - extract dosage/frequency/route with regexes
-    - confirm drug names through the existing lookup engine
+    Lower confidence threshold than chat (0.78 vs 0.82) because OCR text
+    contains character-level errors that reduce fuzzy-match scores.
+    Prescription abbreviations (T., Cap., Inj.) are stripped first so they
+    don't break candidate generation.
+
+    Pipeline:
+        1. Clean prescription shorthands ("T. Metformin" → "Metformin")
+        2. Split into segments → generate n-gram candidates
+        3. Validate each candidate via drug lookup (min_score=70 for OCR)
     """
     from app.services.drug_lookup import lookup_drug, normalize_text
+
+    # Strip prescription prefixes that break candidate extraction
+    cleaned_text = _clean_prescription_text(text)
 
     seen_candidates: set[str] = set()
     seen_entities: set[str] = set()
     entities: List[Dict[str, Any]] = []
 
-    for segment in _split_segments(text):
+    for segment in _split_segments(cleaned_text):
         fields = _context_fields(segment)
         for candidate in _candidate_ngrams(segment):
             candidate_key = normalize_text(candidate)
@@ -269,7 +301,8 @@ def extract_medication_entities(
                 continue
             seen_candidates.add(candidate_key)
 
-            result = lookup_drug(candidate, disease=disease, age=age, top_k=1, min_score=82)
+            # Lower min_score=70 for OCR — fuzzy matching must tolerate OCR errors
+            result = lookup_drug(candidate, disease=disease, age=age, top_k=1, min_score=70)
             best_match = result.get("best_match")
             confidence = float(result.get("confidence") or 0.0)
             if not best_match or confidence < min_confidence:
@@ -280,7 +313,11 @@ def extract_medication_entities(
                 continue
             seen_entities.add(entity_key)
 
-            name = best_match.get("generic_name_clean") or best_match.get("generic_name") or result.get("normalized")
+            name = (
+                best_match.get("generic_name_clean")
+                or best_match.get("generic_name")
+                or result.get("normalized")
+            )
             entities.append(
                 {
                     "text": segment,
@@ -363,7 +400,15 @@ def _validate_candidates(
         if not any(strict_ctx.values()) and result.get("match_type") not in {"exact", "alias"} and not shared_tokens:
             continue
 
-        if disease_kws and result.get("match_type") not in {"exact", "alias"} and not disease_matches:
+        # Only apply disease-relevance filter for borderline-confidence matches.
+        # High-confidence matches (≥ 0.90) are accepted regardless — sparse drug
+        # data may not mention the disease but the drug is still valid.
+        if (
+            confidence < 0.90
+            and disease_kws
+            and result.get("match_type") not in {"exact", "alias"}
+            and not disease_matches
+        ):
             continue
 
         drug_id = best_match.get("drug_id", "")
@@ -437,6 +482,8 @@ def extract_medical_entities(
             "scispacy_available": _SCISPACY_AVAILABLE,
         }
 
+    # Strip prescription shorthands before NER passes
+    text = _clean_prescription_text(text)
     context_global = _extract_context(text)
     seen_ids: set[str] = set()
     drugs: List[Dict[str, Any]] = []
