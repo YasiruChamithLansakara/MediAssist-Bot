@@ -137,21 +137,16 @@ def _otsu_threshold(image) -> int:
         return 127  # safe fallback
 
 
-def _preprocess_image(image):
+def _preprocess_base(image):
     """
-    Preprocessing pipeline for reliable OCR on prescription images:
-    1. Upscale small images (target longest side ≥ 1800 px)
-    2. Grayscale
-    3. Auto-contrast (stretch histogram)
-    4. Otsu thresholding (binarise — improves Tesseract on noisy/printed text)
-    5. Light sharpening
+    Shared first stage: upscale + grayscale + auto-contrast.
+    Returned image is suitable for EasyOCR directly.
     """
     if Image is None:
         return image
 
-    from PIL import ImageEnhance, ImageFilter, ImageOps
+    from PIL import ImageFilter, ImageOps
 
-    # 1. Upscale
     width, height = image.size
     largest_side = max(width, height)
     if largest_side and largest_side < 1800:
@@ -161,16 +156,30 @@ def _preprocess_image(image):
             resample=Image.Resampling.LANCZOS,
         )
 
-    # 2. Grayscale + 3. Auto-contrast
     image = ImageOps.grayscale(image)
     image = ImageOps.autocontrast(image, cutoff=1)
+    return image
 
-    # 4. Otsu binarisation — converts to clean black-on-white for Tesseract
+
+def _preprocess_for_tesseract(image):
+    """
+    Tesseract-specific extra steps on top of the base image:
+    Otsu binarisation + sharpen gives clean black-on-white text
+    that maximises Tesseract accuracy.
+    """
+    if Image is None:
+        return image
+
+    from PIL import ImageFilter
+
     thresh = _otsu_threshold(image)
     image = image.point(lambda px: 255 if px > thresh else 0, "L")
-
-    # 5. Sharpen
     return image.filter(ImageFilter.SHARPEN)
+
+
+def _preprocess_image(image):
+    """Full pipeline for Tesseract (backward-compat wrapper)."""
+    return _preprocess_for_tesseract(_preprocess_base(image))
 
 
 def ocr_runtime_status() -> Dict[str, Any]:
@@ -189,9 +198,12 @@ def ocr_runtime_status() -> Dict[str, Any]:
     }
 
 
+_TESS_CONFIG = "--psm 6 --oem 3"  # uniform block of text, LSTM engine
+
+
 def _ocr_single_image(image) -> Tuple[str, Optional[float]]:
     try:
-        text = pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image, config=_TESS_CONFIG)
     except pytesseract.TesseractNotFoundError as exc:
         raise OCRDependencyError(
             "Tesseract is not installed or not in PATH. Install it or set TESSERACT_CMD."
@@ -199,14 +211,16 @@ def _ocr_single_image(image) -> Tuple[str, Optional[float]]:
 
     confidence = None
     try:
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        data = pytesseract.image_to_data(image, config=_TESS_CONFIG, output_type=pytesseract.Output.DICT)
+        # Only count words Tesseract is reasonably sure about (conf >= 40).
+        # Low-confidence entries are usually noise/artifacts and skew the average down.
         values: List[float] = []
         for raw in data.get("conf", []):
             try:
                 parsed = float(raw)
             except (TypeError, ValueError):
                 continue
-            if parsed >= 0:
+            if parsed >= 40:
                 values.append(parsed)
         if values:
             confidence = round((sum(values) / len(values)) / 100.0, 4)
@@ -269,28 +283,33 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Opti
     """
     Hybrid OCR pipeline:
 
-    Tesseract: angle sweep at 0°, ±6°, ±10° (rotation correction for tilted scans).
-    EasyOCR:   single pass at 0° — it handles rotation natively, no sweep needed.
+    Tesseract: angle sweep at 0°, ±6°, ±10° on the binarized image.
+               Binarization (Otsu) maximises Tesseract accuracy on printed text.
+    EasyOCR:   single pass on the grayscale-only image (no binarization).
+               EasyOCR's CNN is trained on natural images; binarization hurts it.
 
     The best candidate is chosen by medication-signal score (dosage/frequency/route
-    keyword density + raw engine confidence), not just raw confidence alone.
+    keyword density + engine confidence), not raw confidence alone.
     """
     if pytesseract is None and not _easyocr_available():
         raise OCRDependencyError(
             "OCR dependency is not installed. Install pytesseract or easyocr."
         )
 
-    image = _preprocess_image(_open_image(image_bytes))
-    candidates: List[Tuple[float, str, Optional[float], Optional[str]]] = []
     _configure_tesseract()
+    raw = _open_image(image_bytes)
+    base_image = _preprocess_base(raw)                       # grayscale + autocontrast
+    tess_image = _preprocess_for_tesseract(base_image)       # + Otsu binarize + sharpen
 
-    # ── Tesseract angle sweep ─────────────────────────────────────────────
+    candidates: List[Tuple[float, str, Optional[float], Optional[str]]] = []
+
+    # ── Tesseract angle sweep (binarized image) ───────────────────────────
     if pytesseract is not None:
         for angle in (0, -10, 10, -6, 6):
             candidate_image = (
-                image
+                tess_image
                 if angle == 0
-                else image.rotate(
+                else tess_image.rotate(
                     angle,
                     resample=Image.Resampling.BICUBIC,
                     expand=True,
@@ -302,17 +321,18 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Opti
                 (_ocr_candidate_score(text, confidence), text, confidence, "tesseract")
             )
 
-    # ── EasyOCR — single pass at 0° (handles rotation internally) ────────
-    easy_text, easy_confidence = _easyocr_single_image(image)
-    if easy_text:
-        candidates.append(
-            (
-                _ocr_candidate_score(easy_text, easy_confidence),
-                easy_text,
-                easy_confidence,
-                "easyocr",
+    # ── EasyOCR — grayscale image, no binarization ────────────────────────
+    if _easyocr_available():
+        easy_text, easy_confidence = _easyocr_single_image(base_image)
+        if easy_text:
+            candidates.append(
+                (
+                    _ocr_candidate_score(easy_text, easy_confidence),
+                    easy_text,
+                    easy_confidence,
+                    "easyocr",
+                )
             )
-        )
 
     if not candidates:
         raise OCRDependencyError(
