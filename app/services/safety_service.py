@@ -31,8 +31,9 @@ EMERGENCY_SYMPTOMS = {
     ],
     "consciousness": [
         "fainting", "fainted", "blacked out", "losing consciousness", "passing out",
-        "dizzy", "dizziness", "confusion", "confused", "disorientation", "unresponsive",
-        "loss of consciousness", "syncope", "altered mental status"
+        "unresponsive", "loss of consciousness", "syncope", "altered mental status",
+        "sudden confusion", "sudden disorientation", "cannot wake",
+        # "dizzy"/"confused" removed — too common/benign to reliably flag as emergency
     ],
     "seizure": [
         "seizure", "seizing", "convulsion", "convulsing", "muscle spasm", "jerking",

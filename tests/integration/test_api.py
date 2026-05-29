@@ -257,6 +257,63 @@ def test_prescription_analyze_text_rejects_empty_text(client: TestClient):
     assert_error_shape(data)
 
 
+def test_dashboard_returns_all_status_keys(client: TestClient):
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    data = r.json()
+    assert "llm_available" in data
+    assert "rag_status" in data
+    assert "faiss" in data
+    assert "ocr_runtime" in data
+    assert "ner" in data
+    assert "memory" in data
+    assert "activity" in data
+
+
+def test_chat_emergency_symptoms_trigger_alert(client: TestClient):
+    r = client.post(
+        "/api/chat",
+        json={
+            "message": "I have severe chest pain and chest pressure right now",
+            "disease": "heart disease",
+            "age": 60,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["is_emergency"] is True
+    # emergency_symptoms lives inside the safety sub-dict
+    safety = data.get("safety", {})
+    assert safety.get("is_emergency") is True
+    assert "chest" in safety.get("emergency_symptoms", [])
+    # Emergency answer must contain action guidance
+    assert any(word in data["answer"].lower() for word in ("emergency", "call", "911", "immediately"))
+
+
+def test_chat_non_emergency_dizziness_not_flagged(client: TestClient):
+    """'Dizzy' alone should NOT trigger an emergency alert (removed as over-broad trigger)."""
+    r = client.post(
+        "/api/chat",
+        json={
+            "message": "I feel a bit dizzy after taking my metformin this morning",
+            "disease": "diabetes",
+            "age": 50,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["is_emergency"] is False
+
+
+def test_memory_stats_endpoint(client: TestClient):
+    r = client.get("/api/memory/stats")
+    assert r.status_code == 200
+    data = r.json()
+    # stats are nested under a "stats" key in the response
+    stats = data.get("stats", data)
+    assert "active_sessions" in stats or "total_sessions" in stats or "sessions" in stats
+
+
 def test_prescription_reports_ocr_dependency_error(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     def fake_ocr_prescription_image(**kwargs):
         raise OCRDependencyError("Tesseract is not installed.")
