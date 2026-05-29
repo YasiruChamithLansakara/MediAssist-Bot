@@ -1,3 +1,4 @@
+# Improve by Yasiru
 import pytest
 from fastapi.testclient import TestClient
 
@@ -34,6 +35,33 @@ def test_meta_ok(client: TestClient):
     assert "age_range" in data
     assert data["features"]["lightweight_ner"] is True
     assert "ocr_runtime" in data
+
+
+def test_dashboard_ok_and_tracks_activity(client: TestClient):
+    lookup_response = client.get("/api/lookup?drug=acetaminophen&disease=diabetes&age=30")
+    assert lookup_response.status_code == 200
+
+    chat_response = client.post(
+        "/api/chat",
+        json={
+            "message": "Is metformin safe for diabetes?",
+            "drug": "metformin",
+            "disease": "diabetes",
+            "age": 45,
+        },
+    )
+    assert chat_response.status_code == 200
+
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    data = r.json()
+
+    assert "memory" in data
+    assert "activity" in data
+    assert "meta" in data
+    assert data["activity"]["counts"]["lookup"] >= 1
+    assert data["activity"]["counts"]["chat"] >= 1
+    assert isinstance(data["activity"]["recent_events"], list)
 
 
 def test_lookup_requires_params(client: TestClient):
@@ -129,6 +157,61 @@ def test_chat_accepts_explicit_drug(client: TestClient):
     assert data["intent"] == "dosage"
     assert data["matched_drugs"]
     assert data["matched_drugs"][0]["best_match"] is not None
+
+
+def test_chat_stores_and_returns_session_history(client: TestClient):
+    session_id = "smoke-session-1"
+
+    r = client.post(
+        "/api/chat",
+        json={
+            "message": "Is metformin safe for diabetes?",
+            "drug": "metformin",
+            "disease": "diabetes",
+            "age": 45,
+            "session_id": session_id,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["session_id"] == session_id
+    assert data["answer_source"] in {"rule_based", "llm_grounded"}
+
+    history_response = client.get(f"/api/chat/history/{session_id}")
+    assert history_response.status_code == 200
+    history_data = history_response.json()
+    assert history_data["session_id"] == session_id
+    assert len(history_data["history"]) == 2
+    assert history_data["context"]["disease"] == "diabetes"
+    assert history_data["context"]["age"] == 45
+
+
+def test_rag_search_returns_results_when_service_available(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """FAISS semantic search endpoint returns results when index is ready."""
+    class FakeFAISSStore:
+        def is_ready(self):
+            return True
+
+        def search(self, query: str, top_k: int = 5):
+            return [
+                {
+                    "drug_id": "met001",
+                    "drug_name": "metformin",
+                    "generic_name": "metformin",
+                    "similarity": 0.97,
+                    "metadata": {"indications": "Type 2 diabetes"},
+                }
+            ][:top_k]
+
+    monkeypatch.setattr(main_module, "get_faiss_store", lambda: FakeFAISSStore())
+
+    r = client.post("/api/rag/search?query=metformin diabetes&top_k=3")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["query"] == "metformin diabetes"
+    assert data["count"] == 1
+    assert data["results"][0]["drug_name"] == "metformin"
+    assert data["results"][0]["similarity"] == 0.97
 
 
 def test_prescription_rejects_non_image_upload(client: TestClient):

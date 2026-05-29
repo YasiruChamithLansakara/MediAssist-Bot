@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.medical_safety import (
+from app.services.safety_service import (
     MedicalSafetyGuard,
     detect_emergency_symptoms,
     detect_forbidden_patterns,

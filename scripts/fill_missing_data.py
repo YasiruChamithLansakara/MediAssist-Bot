@@ -473,7 +473,10 @@ def main():
     parser.add_argument("--delay",         type=float, default=2.0,  help="Delay between LLM calls in seconds (default 2.0 for free tier)")
     parser.add_argument("--save-interval", type=int,   default=25,   help="Checkpoint save every N processed rows (default 25)")
     parser.add_argument("--model",         type=str,   default="llama-3.1-8b-instant", help="Groq model name")
-    parser.add_argument("--input",         type=str,   default=str(INPUT_CSV),  help="Input CSV path")
+    # Auto-resume: if the enriched output already exists use it as input so
+    # re-runs preserve all prior LLM fills rather than starting from scratch.
+    _default_input = str(OUTPUT_CSV) if OUTPUT_CSV.exists() else str(INPUT_CSV)
+    parser.add_argument("--input",         type=str,   default=_default_input,  help="Input CSV path (default: enriched CSV if it exists, else original clean CSV)")
     parser.add_argument("--output",        type=str,   default=str(OUTPUT_CSV), help="Output CSV path")
     args = parser.parse_args()
 

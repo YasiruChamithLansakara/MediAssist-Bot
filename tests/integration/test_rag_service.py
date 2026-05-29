@@ -1,20 +1,17 @@
 """
-Tests for RAG Vector Search Service
+Tests for the RAG / semantic search layer.
+
+SQLite RAG has been removed. All semantic search is now handled by the
+FAISS store (app.ml.faiss_store).  This file tests:
+  1. The RAGService compatibility stub — always disabled, no-op.
+  2. The FAISS store interface — build, search, save/load.
 """
 
 import os
+import tempfile
 import pytest
-import numpy as np
-from pathlib import Path
 
-# Mock environment before importing RAG service
-os.environ["RAG_ENABLED"] = "1"
-os.environ["EMBEDDING_PROVIDER"] = "tfidf"  # Use TF-IDF for testing (no external deps)
-os.environ["VECTOR_DB_PATH"] = str(Path(__file__).resolve().parent / ".test_vector_db.sqlite3")
-
-from app.services.rag_vector_search import (
-    TFIDFEmbedding,
-    VectorDatabase,
+from app.services.rag_service import (
     RAGService,
     get_rag_service,
     is_rag_available,
@@ -23,254 +20,195 @@ from app.services.rag_vector_search import (
 )
 
 
-class TestEmbedding:
-    """Test embedding backends."""
+# ─────────────────────────────────────────────────────────────────────────────
+# RAGService stub tests
+# ─────────────────────────────────────────────────────────────────────────────
 
-    def test_tfidf_embedding_basic(self):
-        """Test TF-IDF embedding."""
-        embedder = TFIDFEmbedding()
-        
-        texts = ["acetaminophen", "ibuprofen", "aspirin"]
-        embeddings = embedder.embed(texts)
-        
-        assert embeddings is not None
-        assert embeddings.shape[0] == 3
-        assert embeddings.dtype == np.float32
-
-    def test_tfidf_embedding_dimension(self):
-        """Test TF-IDF dimension."""
-        embedder = TFIDFEmbedding()
-        dim = embedder.get_dimension()
-        
-        assert dim > 0
-        assert dim == 100  # TF-IDF max_features
-
-    def test_tfidf_embedding_single(self):
-        """Test single text embedding."""
-        embedder = TFIDFEmbedding()
-        
-        embedding = embedder.embed_single("aspirin")
-        
-        assert embedding is not None
-        # Dimension varies based on input text, but should be > 0
-        assert embedding.shape[0] > 0
-        assert embedding.dtype == np.float32
-
-
-class TestVectorDatabase:
-    """Test vector database operations."""
-
-    @pytest.fixture
-    def db(self):
-        """Create test database."""
-        db_path = os.environ["VECTOR_DB_PATH"]
-        
-        # Remove if exists
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        
-        database = VectorDatabase(db_path, embedding_dim=100)
-        yield database
-        
-        # Cleanup
-        if os.path.exists(db_path):
-            os.remove(db_path)
-
-    def test_vector_db_init(self, db):
-        """Test database initialization."""
-        assert db.db_path == os.environ["VECTOR_DB_PATH"]
-        assert db.embedding_dim == 100
-
-    def test_add_vector(self, db):
-        """Test adding vectors to database."""
-        embedding = np.random.rand(100).astype(np.float32)
-        
-        result = db.add_vector(
-            drug_name="Aspirin",
-            generic_name="acetylsalicylic acid",
-            embedding=embedding,
-            disease_context="pain",
-            metadata={"warning": "blood thinner"},
-        )
-        
-        assert result is True
-        assert db.count() == 1
-
-    def test_search(self, db):
-        """Test vector search."""
-        # Add some vectors
-        embeddings = np.random.rand(5, 100).astype(np.float32)
-        drugs = ["aspirin", "ibuprofen", "acetaminophen", "naproxen", "ketorolac"]
-        
-        for drug, emb in zip(drugs, embeddings):
-            db.add_vector(
-                drug_name=drug.capitalize(),
-                generic_name=drug,
-                embedding=emb,
-                metadata={"type": "pain_relief"},
-            )
-        
-        # Search
-        query_embedding = embeddings[0]  # Should match aspirin
-        results = db.search(query_embedding, top_k=3)
-        
-        assert len(results) > 0
-        assert results[0]["drug_name"] == "Aspirin"
-
-    def test_clear_database(self, db):
-        """Test clearing database."""
-        embedding = np.random.rand(100).astype(np.float32)
-        db.add_vector("Test", "test", embedding)
-        
-        assert db.count() == 1
-        
-        db.clear()
-        assert db.count() == 0
-
-
-class TestRAGService:
-    """Test RAG service integration."""
+class TestRAGServiceStub:
+    """RAGService is a no-op stub — SQLite RAG has been removed."""
 
     def test_rag_service_init(self):
-        """Test RAG service initialization."""
+        """Stub initialises without error."""
         rag = RAGService()
-        
-        # Service might not be enabled if dependencies missing
-        # But should initialize without error
         assert rag is not None
 
+    def test_rag_service_disabled(self):
+        """Stub is always disabled."""
+        rag = RAGService()
+        assert rag.is_available() is False
+
     def test_rag_service_status(self):
-        """Test getting RAG status."""
+        """Status dict has the expected shape."""
         rag = RAGService()
         status = rag.get_status()
-        
         assert isinstance(status, dict)
         assert "rag_enabled" in status
         assert "provider" in status
+        assert status["rag_enabled"] is False
 
-    def test_vectorize_drugs(self):
-        """Test drug vectorization."""
+    def test_retrieve_context_returns_empty(self):
+        """Stub always returns an empty list."""
         rag = RAGService()
-        
-        if not rag.is_available():
-            pytest.skip("RAG not available")
-        
-        drugs = [
-            {
-                "name": "Aspirin",
-                "generic_name": "acetylsalicylic acid",
-                "sections": {
-                    "indications": "Pain relief",
-                    "warnings": "May cause bleeding",
-                    "contraindications": "Pregnancy",
-                },
-                "disease": "pain",
-            },
-            {
-                "name": "Ibuprofen",
-                "generic_name": "ibuprofen",
-                "sections": {
-                    "indications": "Fever and pain",
-                    "warnings": "GI upset",
-                    "contraindications": "Kidney disease",
-                },
-                "disease": "fever",
-            },
-        ]
-        
-        count = rag.vectorize_drugs(drugs)
-        
-        # At least some drugs should be vectorized
-        assert count >= 0
+        results = rag.retrieve_context("diabetes medication", top_k=5)
+        assert results == []
 
-    def test_retrieve_context(self):
-        """Test context retrieval."""
+    def test_vectorize_drugs_returns_zero(self):
+        """Stub always returns 0."""
         rag = RAGService()
-        
-        if not rag.is_available():
-            pytest.skip("RAG not available")
-        
-        # First vectorize some data
-        drugs = [
-            {
-                "name": "Aspirin",
-                "generic_name": "acetylsalicylic acid",
-                "sections": {
-                    "indications": "Pain relief and fever reduction",
-                    "warnings": "May cause bleeding",
-                    "contraindications": "Pregnancy",
-                },
-                "disease": "pain",
-            },
-        ]
-        
-        rag.vectorize_drugs(drugs)
-        
-        # Now retrieve
-        results = rag.retrieve_context("aspirin pain relief", top_k=1)
-        
-        # Should get results (even if just the one we added)
-        assert isinstance(results, list)
+        count = rag.vectorize_drugs([{"name": "Aspirin"}])
+        assert count == 0
 
 
 class TestRAGHelpers:
-    """Test RAG helper functions."""
+    """Module-level helper functions are backward-compatible stubs."""
 
-    def test_is_rag_available(self):
-        """Test RAG availability check."""
+    def test_is_rag_available_false(self):
         available = is_rag_available()
-        
-        assert isinstance(available, bool)
+        assert available is False
 
-    def test_get_rag_service(self):
-        """Test getting RAG service."""
+    def test_get_rag_service_returns_instance(self):
         rag = get_rag_service()
-        
         assert rag is not None
         assert hasattr(rag, "is_available")
         assert hasattr(rag, "retrieve_context")
         assert hasattr(rag, "vectorize_drugs")
 
+    def test_retrieve_drug_context_empty(self):
+        results = retrieve_drug_context("aspirin", top_k=3)
+        assert results == []
 
-class TestRAGIntegration:
-    """Integration tests for RAG with chat flow."""
+    def test_vectorize_drug_knowledge_zero(self):
+        count = vectorize_drug_knowledge([{"name": "Test"}])
+        assert count == 0
 
-    def test_rag_in_chat_context(self):
-        """Test RAG used in chat context."""
-        # Simulate a chat scenario where RAG enhances LLM context
-        
-        drug_list = [
-            {
-                "name": "Metformin",
-                "generic_name": "metformin",
-                "sections": {
-                    "indications": "Type 2 diabetes management",
-                    "warnings": "Lactic acidosis risk",
-                    "contraindications": "Kidney disease",
-                },
-                "disease": "diabetes",
-            },
-            {
-                "name": "Lisinopril",
-                "generic_name": "lisinopril",
-                "sections": {
-                    "indications": "Hypertension control",
-                    "warnings": "Cough and dizziness",
-                    "contraindications": "Pregnancy",
-                },
-                "disease": "hypertension",
-            },
-        ]
-        
-        # Vectorize
-        count = vectorize_drug_knowledge(drug_list)
-        
-        # Retrieve for chat
-        if is_rag_available():
-            results = retrieve_drug_context("diabetes medication", top_k=2)
-            
-            # Should get semantic matches
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FAISS store tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    import faiss  # noqa: F401
+    from app.ml.faiss_store import FAISSStore
+    from app.ml.embeddings import is_available as embeddings_available
+    _FAISS_TEST_DEPS = True
+except ImportError:
+    _FAISS_TEST_DEPS = False
+
+
+@pytest.mark.skipif(
+    not _FAISS_TEST_DEPS,
+    reason="faiss-cpu or sentence-transformers not installed",
+)
+class TestFAISSStore:
+    """FAISS store: build, search, persist."""
+
+    SAMPLE_DRUGS = [
+        {
+            "drug_id": "met001",
+            "generic_name": "metformin",
+            "generic_name_clean": "metformin",
+            "brand_names": "Glucophage",
+            "drug_class": "Biguanide",
+            "indications": "Type 2 diabetes management",
+            "warnings": "Lactic acidosis risk; hold before contrast imaging",
+            "contraindications": "Kidney disease, liver failure",
+            "disease_category": "diabetes",
+        },
+        {
+            "drug_id": "lis001",
+            "generic_name": "lisinopril",
+            "generic_name_clean": "lisinopril",
+            "brand_names": "Zestril",
+            "drug_class": "ACE inhibitor",
+            "indications": "Hypertension and heart failure",
+            "warnings": "Dry cough, angioedema",
+            "contraindications": "Pregnancy",
+            "disease_category": "hypertension",
+        },
+        {
+            "drug_id": "asp001",
+            "generic_name": "aspirin",
+            "generic_name_clean": "aspirin",
+            "brand_names": "Bayer",
+            "drug_class": "NSAID / antiplatelet",
+            "indications": "Pain, fever, antiplatelet therapy",
+            "warnings": "Bleeding risk",
+            "contraindications": "Active peptic ulcer",
+            "disease_category": "heart_disease",
+        },
+    ]
+
+    def test_faiss_store_init(self):
+        """Store can be instantiated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            assert store is not None
+            assert not store.is_ready()
+
+    def test_faiss_store_build(self):
+        """Build succeeds when embeddings are available."""
+        if not embeddings_available():
+            pytest.skip("No embedding backend available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            count = store.build(self.SAMPLE_DRUGS)
+            assert count == len(self.SAMPLE_DRUGS)
+            assert store.is_ready()
+            assert store.vector_count() == len(self.SAMPLE_DRUGS)
+
+    def test_faiss_store_search(self):
+        """Search returns relevant results."""
+        if not embeddings_available():
+            pytest.skip("No embedding backend available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            store.build(self.SAMPLE_DRUGS)
+
+            results = store.search("diabetes sugar medication", top_k=2)
             assert isinstance(results, list)
+            assert len(results) > 0
+            # Metformin should rank highest for a diabetes query
+            top = results[0]
+            assert "drug_name" in top
+            assert "similarity" in top
+            assert 0.0 <= top["similarity"] <= 1.0
+
+    def test_faiss_store_search_empty_when_not_ready(self):
+        """Search on un-built store returns empty list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            results = store.search("aspirin", top_k=3)
+            assert results == []
+
+    def test_faiss_store_save_and_load(self):
+        """Index survives a save → load round-trip."""
+        if not embeddings_available():
+            pytest.skip("No embedding backend available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            store.build(self.SAMPLE_DRUGS)
+            assert store.save() is True
+
+            store2 = FAISSStore(index_path=tmpdir)
+            assert store2.load() is True
+            assert store2.is_ready()
+            assert store2.vector_count() == len(self.SAMPLE_DRUGS)
+
+            results = store2.search("blood pressure hypertension", top_k=1)
+            assert len(results) > 0
+
+    def test_faiss_status_dict(self):
+        """status() returns expected keys."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            st = store.status()
+            assert "faiss_available" in st
+            assert "index_ready" in st
+            assert "vector_count" in st
+            assert "dimension" in st
 
 
 if __name__ == "__main__":

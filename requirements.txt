@@ -12,6 +12,8 @@ rapidfuzz
 # Prescription OCR
 pytesseract
 Pillow
+easyocr          # hybrid OCR engine (downloads ~200 MB models on first run)
+torchvision      # required by easyocr (matches torch version already installed)
 
 # Utilities
 requests

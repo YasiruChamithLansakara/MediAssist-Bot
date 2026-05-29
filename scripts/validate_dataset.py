@@ -5,7 +5,7 @@ import json
 
 class DatasetValidator:
     def __init__(self, csv_path):
-        self.df = pd.read_csv("data/processed/drug_knowledge_bot_ready_clean.csv")
+        self.df = pd.read_csv("data/processed/drug_knowledge_enriched.csv")
         self.validation_report = {}
     
     def check_missing_values(self):

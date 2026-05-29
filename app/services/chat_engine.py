@@ -11,21 +11,21 @@ from app.services.drug_lookup import (
 )
 
 from app.services.ner_service import extract_medication_entities
-from app.services.medical_safety import (
+from app.services.safety_service import (
     MedicalSafetyGuard,
     detect_emergency_symptoms,
     get_safety_notice,
 )
 
 # =========================================
-# RAG + FAISS INTEGRATION (NEW)
+# FAISS SEMANTIC SEARCH
 # =========================================
 try:
-    from app.services.rag_service import RAGService
-    RAG_AVAILABLE = True
+    from app.ml.faiss_store import get_faiss_store
+    _FAISS_IMPORT_OK = True
 except Exception:
-    RAGService = None
-    RAG_AVAILABLE = False
+    get_faiss_store = None  # type: ignore[assignment]
+    _FAISS_IMPORT_OK = False
 
 SAFETY_NOTICE = get_safety_notice()
 
@@ -65,15 +65,17 @@ def _intent(message: str) -> str:
 
 
 # =====================================================
-# FAISS RAG CONTEXT BUILDER
+# FAISS CONTEXT BUILDER
 # =====================================================
 def _get_rag_context(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    if not RAG_AVAILABLE:
+    """Retrieve semantically similar drugs from the FAISS index."""
+    if not _FAISS_IMPORT_OK or get_faiss_store is None:
         return []
-
     try:
-        rag = RAGService()
-        return rag.retrieve_context(query, top_k=top_k)
+        store = get_faiss_store()
+        if not store.is_ready():
+            return []
+        return store.search(query, top_k=top_k)
     except Exception:
         return []
 
@@ -170,6 +172,8 @@ def build_chat_response(
         age=age,
         match=matched[0].get("best_match") if matched else None,
     )
+    context["disease"] = disease
+    context["age"] = age
 
     # -------------------------------------------------
     # 6. EMERGENCY OVERRIDE
@@ -197,11 +201,12 @@ def build_chat_response(
         "intent": intent,
         "answer": answer,
         "detected_entities": detected_entities,
-        "matched": matched,
+        "matched_drugs": matched,
         "citations": citations,
         "context": context,
         "is_emergency": is_emergency,
         "safety": safety_check,
+        "safety_notice": SAFETY_NOTICE,
         "request_id": request_id,
     }
 
