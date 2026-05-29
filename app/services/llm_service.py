@@ -16,6 +16,14 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Iterator
 
+# If a local .env file exists, load it so environment variables (LLM_API_KEY, etc.) are available.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:
+    pass
+
 logger = logging.getLogger("mediassist.llm")
 
 # Prefer the new FAISS-backed store; keep the legacy RAG service as fallback.
@@ -67,11 +75,14 @@ class LLMService:
     def __init__(self, provider: str = LLM_PROVIDER, api_key: str = LLM_API_KEY):
         self.provider = provider
         self.api_key = api_key
-        self.enabled = provider == "openai" and bool(api_key)
+        self.enabled = (provider == "openai" and bool(api_key)) or (provider == "huggingface" and bool(api_key))
         self.client = None
 
         if self.enabled:
-            self._init_openai_client()
+            if self.provider == "openai":
+                self._init_openai_client()
+            elif self.provider == "huggingface":
+                self._init_huggingface_client()
 
     def _init_openai_client(self) -> None:
         """Initialize OpenAI client."""
@@ -86,6 +97,16 @@ class LLMService:
             self.enabled = False
         except Exception as e:
             logger.warning(f"Failed to initialize OpenAI: {e}")
+            self.enabled = False
+
+    def _init_huggingface_client(self) -> None:
+        """Prepare Hugging Face Inference client configuration."""
+        try:
+            # store model id for inference calls; no external client required here
+            self.hf_model = LLM_MODEL or "gpt2"
+            logger.info(f"HuggingFace LLM configured with model {self.hf_model}")
+        except Exception as e:
+            logger.warning(f"Failed to configure HuggingFace provider: {e}")
             self.enabled = False
 
     def is_available(self) -> bool:
@@ -207,22 +228,56 @@ class LLMService:
             # Build messages for API
             messages = self._build_messages(context, conversation_history)
 
-            # Call OpenAI API
-            response = self.client.ChatCompletion.create(
-                model=LLM_MODEL,
-                messages=messages,
-                temperature=LLM_TEMPERATURE,
-                max_tokens=LLM_MAX_TOKENS,
-                timeout=30,
-            )
+            # Hugging Face Inference provider
+            if self.provider == "huggingface":
+                try:
+                    import requests
 
-            answer = response.choices[0].message.content.strip()
+                    # Flatten messages into a single prompt
+                    prompt = "\n\n".join([m.get("content", "") for m in messages if m.get("content")])
+                    url = f"https://api-inference.huggingface.co/models/{LLM_MODEL}"
+                    headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
+                    payload = {
+                        "inputs": prompt,
+                        "parameters": {"max_new_tokens": max(32, min(LLM_MAX_TOKENS, 512))},
+                    }
+                    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-            # Ensure disclaimers are included
-            if "disclaimer" not in answer.lower() and "not medical advice" not in answer.lower():
-                answer += MEDICAL_SAFETY_ADDENDUM
+                    # Parse common HF response shapes
+                    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                        answer = (data[0].get("generated_text") or "").strip()
+                    elif isinstance(data, dict) and "generated_text" in data:
+                        answer = (data.get("generated_text") or "").strip()
+                    elif isinstance(data, str):
+                        answer = data.strip()
+                    else:
+                        answer = str(data)
 
-            return answer
+                    if "disclaimer" not in answer.lower() and "not medical advice" not in answer.lower():
+                        answer += MEDICAL_SAFETY_ADDENDUM
+                    return answer
+                except Exception as e:
+                    logger.error(f"HuggingFace generation failed: {e}")
+                    return None
+
+            # OpenAI provider (existing behavior)
+            if self.provider == "openai" and self.client is not None:
+                response = self.client.ChatCompletion.create(
+                    model=LLM_MODEL,
+                    messages=messages,
+                    temperature=LLM_TEMPERATURE,
+                    max_tokens=LLM_MAX_TOKENS,
+                    timeout=30,
+                )
+
+                answer = response.choices[0].message.content.strip()
+                if "disclaimer" not in answer.lower() and "not medical advice" not in answer.lower():
+                    answer += MEDICAL_SAFETY_ADDENDUM
+                return answer
+
+            return None
 
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")

@@ -2,7 +2,8 @@
 # Install with: pip install -r requirements-llm.txt
 
 # OpenAI GPT integration for advanced chat responses
-openai>=0.27.0
+# Pinned to the pre-1.0 client used by app/services/llm_service.py.
+openai>=0.27.0,<1.0.0
 
 # Alternative LLM providers (optional)
 # anthropic  # For Claude models

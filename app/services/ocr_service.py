@@ -194,7 +194,7 @@ def _ocr_candidate_score(text: str, confidence: Optional[float]) -> float:
     return float(confidence or 0.0) + medication_signal + line_bonus + min(useful_words / 30.0, 3.0)
 
 
-def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float]]:
+def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Optional[str]]:
     """
     Returns (text, avg_confidence 0..1 or None).
 
@@ -207,7 +207,7 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float]]:
 
     image = _preprocess_image(_open_image(image_bytes))
 
-    candidates: List[Tuple[float, str, Optional[float]]] = []
+    candidates: List[Tuple[float, str, Optional[float], Optional[str]]] = []
     _configure_tesseract()
     for angle in (0, -10, 10, -6, 6):
         candidate_image = image
@@ -215,17 +215,17 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float]]:
             candidate_image = image.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor=255)
         if pytesseract is not None:
             text, confidence = _ocr_single_image(candidate_image)
-            candidates.append((_ocr_candidate_score(text, confidence), text, confidence))
+            candidates.append((_ocr_candidate_score(text, confidence), text, confidence, "tesseract"))
 
         easy_text, easy_confidence = _easyocr_single_image(candidate_image)
         if easy_text:
-            candidates.append((_ocr_candidate_score(easy_text, easy_confidence), easy_text, easy_confidence))
+            candidates.append((_ocr_candidate_score(easy_text, easy_confidence), easy_text, easy_confidence, "easyocr"))
 
     if not candidates:
         raise OCRDependencyError("OCR runtime is unavailable. Install pytesseract or easyocr.")
 
-    _, best_text, best_confidence = max(candidates, key=lambda item: item[0])
-    return best_text, best_confidence
+    _, best_text, best_confidence, best_engine = max(candidates, key=lambda item: item[0])
+    return best_text, best_confidence, best_engine
 
 
 def _detected_medicines(text: str, *, disease: str, age: int) -> List[Dict[str, Any]]:
@@ -290,17 +290,18 @@ def ocr_prescription_image(
     - return extracted text
     - detect likely medicines via the lightweight medication NER layer
     """
-    text, confidence = _ocr_with_confidence(image_bytes)
+    text, confidence, engine = _ocr_with_confidence(image_bytes)
     detected = _detected_medicines(text, disease=disease, age=age)
 
     out: Dict[str, Any] = {
         "context": {"disease": disease, "age": age},
         "file": {"name": filename},
-        "ocr": {"text": text, "confidence": confidence},
+        "ocr": {"text": text, "confidence": confidence, "engine": engine},
         "detected_medicines": detected,
         "preprocessing": {
             "enabled": True,
             "method": "pil_upscale_grayscale_autocontrast_sharpen_angle_sweep_hybrid_tesseract_easyocr",
+            "engine": engine,
         },
         "note": "Educational demo only. OCR may be inaccurate. Verify with a pharmacist or doctor.",
     }

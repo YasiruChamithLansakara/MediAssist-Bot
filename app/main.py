@@ -37,12 +37,14 @@ from app.services.conversation_memory import (
     get_conversation_history,
     get_context_summary,
 )
+from app.services.activity_metrics import get_activity_snapshot, record_activity
 from app.services.llm_service import (
     get_llm_service,
     is_llm_available,
     generate_llm_response,
     get_rag_status,
 )
+from app.services.rag_vector_search import get_rag_service, is_rag_available
 from app.services.ner_service import ner_status
 from app.ml.faiss_store import get_faiss_store
 
@@ -60,6 +62,7 @@ RATE_LIMIT_ENABLED = os.getenv(
 RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "120"))  # requests per minute per IP
 RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "20"))  # burst allowance
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
+LLM_ALWAYS_ON = os.getenv("LLM_ALWAYS_ON", "0").strip().lower() in ("1", "true", "yes")
 
 
 def _get_allowed_origins() -> list[str]:
@@ -299,6 +302,25 @@ def meta():
     }
 
 
+@api.get("/dashboard")
+def dashboard(request: Request):
+    rid = getattr(request.state, "request_id", "")
+    memory = get_conversation_memory()
+    stats = memory.stats()
+
+    return {
+        "request_id": rid if rid else None,
+        "memory": stats,
+        "activity": get_activity_snapshot(),
+        "meta": meta(),
+        "llm_available": is_llm_available(),
+        "rag_status": get_rag_status(),
+        "ocr_runtime": ocr_runtime_status(),
+        "ner": ner_status(),
+        "faiss": get_faiss_store().status(),
+    }
+
+
 def _validate_context(disease: str, age: int):
     d = _normalize_disease(disease)
     if d not in set(SUPPORTED_DISEASES):
@@ -332,6 +354,13 @@ def lookup(
     d = _validate_context(disease, age)
 
     result = lookup_drug(q, disease=d, age=age)
+    record_activity(
+        "lookup",
+        success=True,
+        status_code=200,
+        detail=result.get("status", "lookup completed"),
+        context={"drug": q, "disease": d, "age": age},
+    )
     rid = getattr(request.state, "request_id", "")
     if rid:
         result["request_id"] = rid
@@ -391,26 +420,23 @@ def chat(request: Request, payload: ChatRequest):
         request_id=rid,
     )
     
-    # Try to enhance with LLM if available
+    # Try to enhance with LLM if available. Honor LLM_ALWAYS_ON to call LLM even when no matched drugs.
     llm_service = get_llm_service()
-    if llm_service.is_available() and response.get("matched_drugs"):
-        # Filter to matched drugs only
-        matched_drugs = [m for m in response.get("matched_drugs", []) if m.get("best_match")]
-        
-        if matched_drugs:
-            llm_response = llm_service.generate_response(
-                message=msg,
-                disease=d,
-                age=int(payload.age),
-                matched_drugs=matched_drugs,
-                conversation_history=conversation_history,
-            )
-            
-            if llm_response:
-                response["answer"] = llm_response
-                response["answer_source"] = "llm_grounded"
-            else:
-                response["answer_source"] = "rule_based"
+    if llm_service.is_available() and (LLM_ALWAYS_ON or response.get("matched_drugs")):
+        # Provide matched_drugs list if present; LLM can handle empty context when ALWAYS_ON
+        matched_drugs = [m for m in response.get("matched_drugs", []) if m.get("best_match")] or []
+
+        llm_response = llm_service.generate_response(
+            message=msg,
+            disease=d,
+            age=int(payload.age),
+            matched_drugs=matched_drugs,
+            conversation_history=conversation_history,
+        )
+
+        if llm_response:
+            response["answer"] = llm_response
+            response["answer_source"] = "llm_grounded"
         else:
             response["answer_source"] = "rule_based"
     else:
@@ -418,6 +444,20 @@ def chat(request: Request, payload: ChatRequest):
     
     response["llm_available"] = llm_service.is_available()
     response["session_id"] = session_id
+
+    record_activity(
+        "chat",
+        success=True,
+        status_code=200,
+        detail=response.get("answer_source", "chat completed"),
+        context={
+            "disease": d,
+            "age": int(payload.age),
+            "has_drugs": bool(drugs_in),
+            "session_id": session_id,
+            "llm_available": llm_service.is_available(),
+        },
+    )
     
     # Store in conversation memory
     add_turn_to_memory(
@@ -484,15 +524,41 @@ async def prescription_ocr(
             request_id=rid,
         )
     except OCRDependencyError as exc:
+        record_activity(
+            "ocr",
+            success=False,
+            status_code=503,
+            detail="ocr_unavailable",
+            context={"filename": file.filename or "upload", "disease": d, "age": int(age), "engine": None},
+        )
         raise HTTPException(
             status_code=503,
             detail={"code": "ocr_unavailable", "message": str(exc)},
         ) from exc
     except OCRImageError as exc:
+        record_activity(
+            "ocr",
+            success=False,
+            status_code=422,
+            detail="invalid_image",
+            context={"filename": file.filename or "upload", "disease": d, "age": int(age), "engine": None},
+        )
         raise HTTPException(
             status_code=422,
             detail={"code": "invalid_image", "message": str(exc)},
         ) from exc
+    record_activity(
+        "ocr",
+        success=True,
+        status_code=200,
+        detail="ocr completed",
+        context={
+            "filename": file.filename or "upload",
+            "disease": d,
+            "age": int(age),
+            "engine": (result.get("ocr") or {}).get("engine"),
+        },
+    )
     return result
 
 
@@ -504,12 +570,21 @@ def prescription_analyze_text(request: Request, payload: PrescriptionTextRequest
         raise HTTPException(status_code=422, detail={"code": "empty_text", "message": "Text must not be empty."})
 
     rid = getattr(request.state, "request_id", "")
-    return analyze_prescription_text(
+    result = analyze_prescription_text(
         text=text,
         disease=d,
         age=int(payload.age),
         request_id=rid,
     )
+
+    record_activity(
+        "ocr_text",
+        success=True,
+        status_code=200,
+        detail="ocr text analyzed",
+        context={"disease": d, "age": int(payload.age), "text_length": len(text)},
+    )
+    return result
 
 
 # CONVERSATION MEMORY: GET /api/chat/history/{session_id}
@@ -569,7 +644,7 @@ def rag_search(request: Request, query: str = Query(..., min_length=1, max_lengt
     """
     rid = getattr(request.state, "request_id", "")
     
-    if not (is_rag_available and is_rag_available()):
+    if not is_rag_available():
         return _err(
             request,
             code="rag_unavailable",
@@ -579,7 +654,7 @@ def rag_search(request: Request, query: str = Query(..., min_length=1, max_lengt
     
     try:
         rag_service = get_rag_service()
-        if not rag_service:
+        if not rag_service or not rag_service.is_available():
             return _err(
                 request,
                 code="rag_unavailable",

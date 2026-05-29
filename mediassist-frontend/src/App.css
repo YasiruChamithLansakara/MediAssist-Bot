@@ -100,6 +100,12 @@ img {
   margin-bottom: 20px;
 }
 
+.topBarMeta {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
 .eyebrow {
   font-size: 12px;
   font-weight: 800;
@@ -124,6 +130,31 @@ img {
   font-size: 13px;
   font-weight: 700;
   word-break: break-all;
+}
+
+.backendBadge {
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.backendBadge.checking {
+  background: #eef4fb;
+  color: var(--blue-text);
+}
+
+.backendBadge.online {
+  background: var(--green-soft);
+  color: var(--green-text);
+  border-color: rgba(22, 101, 52, 0.18);
+}
+
+.backendBadge.offline {
+  background: var(--red-soft);
+  color: var(--red-text);
+  border-color: rgba(153, 27, 27, 0.18);
 }
 
 .contextPanel {
@@ -197,6 +228,130 @@ textarea:focus {
 .contextState.needs {
   background: #eef4ff;
   color: var(--blue-text);
+}
+
+.systemPanel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.statusCard {
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--surface-soft);
+  border: 1px solid rgba(215, 224, 232, 0.9);
+}
+
+.statusCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.statusCard strong {
+  font-size: 14px;
+}
+
+.statusCard p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.statusDivider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.45) 50%, transparent 100%);
+}
+
+.activityWrap {
+  display: grid;
+  gap: 12px;
+}
+
+.sectionHead.compact {
+  align-items: flex-start;
+}
+
+.sectionHead.compact h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.activityList {
+  display: grid;
+  gap: 10px;
+}
+
+.activityItem {
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(215, 224, 232, 0.9);
+}
+
+.activityItemTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.activityItem p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.activityMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.statusPill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.statusPill.online {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.statusPill.offline {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.smallCaps {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
 }
 
 .tabs {
@@ -703,12 +858,17 @@ textarea:focus {
   }
 
   .contextPanel,
+  .statusGrid,
   .infoGrid,
   .uploadGrid,
   .chatComposer,
   .toolRow,
   .ocrEditor {
     grid-template-columns: 1fr;
+  }
+
+  .statusGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .topBar,
@@ -724,6 +884,15 @@ textarea:focus {
     padding: 12px;
   }
 
+  .topBar {
+    flex-direction: column;
+  }
+
+  .topBarMeta {
+    width: 100%;
+    justify-items: start;
+  }
+
   .workspace {
     padding: 14px;
     border-radius: 22px;
@@ -733,10 +902,15 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .statusGrid {
+    grid-template-columns: 1fr;
+  }
+
   .toolRow,
   .chatComposer,
   .uploadGrid,
   .contextPanel,
+  .statusGrid,
   .infoGrid {
     grid-template-columns: 1fr;
   }
