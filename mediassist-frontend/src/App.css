@@ -847,6 +847,161 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* ── Markdown message content ───────────────────────────────────────────── */
+.msgContent {
+  line-height: 1.65;
+}
+
+.msgLine,
+.msgHeading {
+  margin: 0 0 4px;
+}
+
+.msgHeading {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.msgBullet {
+  display: flex;
+  gap: 8px;
+  margin: 3px 0;
+  align-items: baseline;
+}
+
+.msgBulletDot {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.msgBlank {
+  height: 8px;
+}
+
+.msgDivider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+/* source badge on assistant messages */
+.msgSource {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--blue-soft);
+  color: var(--blue-text);
+}
+
+/* ── Chat panel improvements ─────────────────────────────────────────────── */
+.chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chatClearBtn {
+  min-height: unset;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.chatEmptyState {
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.chatEmptyTitle {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+/* Emergency message */
+.message.emergency {
+  background: var(--red-soft);
+  border-color: rgba(153, 27, 27, 0.28);
+  color: var(--red-text);
+}
+
+.message.emergency .msgContent strong {
+  color: #7f1d1d;
+}
+
+/* Typing indicator */
+.message.loading {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 16px;
+}
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.2; }
+  40%           { opacity: 1;   }
+}
+
+.typingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: blink 1.2s infinite;
+}
+.typingDot:nth-child(2) { animation-delay: 0.2s; }
+.typingDot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Chat composer redesign ──────────────────────────────────────────────── */
+.chatComposer {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+.chatDrugInput {
+  font-size: 13px;
+  min-height: 42px !important;
+  color: var(--muted);
+}
+
+.chatInputRow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.chatInputRow textarea {
+  flex: 1;
+  min-height: 100px;
+}
+
+.chatSendBtn {
+  flex-shrink: 0;
+  align-self: flex-end;
+  min-width: 80px;
+}
+
+/* ── Prescription "send all" button ─────────────────────────────────────── */
+.detectedActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detectedSendAllBtn {
+  min-height: 36px !important;
+  padding: 0 14px !important;
+  font-size: 13px;
+}
+
 .apiLine {
   font-size: 14px;
   color: var(--muted);

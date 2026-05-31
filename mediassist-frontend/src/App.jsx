@@ -1,6 +1,45 @@
 /* Improve by Yasiru */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+// Handles the subset of markdown that the LLM produces:
+//   **bold**, *italic*, • / - bullet lines, --- dividers, # headings
+function renderInline(text) {
+  const parts = text.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**"))
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*"))
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    return part || null;
+  });
+}
+
+function MessageContent({ text }) {
+  const lines = (text || "").split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^---+$/.test(line.trim())) {
+      out.push(<hr key={i} className="msgDivider" />);
+    } else if (/^#{1,3}\s/.test(line)) {
+      out.push(<p key={i} className="msgHeading">{renderInline(line.replace(/^#{1,3}\s/, ""))}</p>);
+    } else if (/^[•\-\*]\s/.test(line)) {
+      out.push(
+        <div key={i} className="msgBullet">
+          <span className="msgBulletDot">•</span>
+          <span>{renderInline(line.replace(/^[•\-\*]\s/, ""))}</span>
+        </div>
+      );
+    } else if (line.trim() === "") {
+      out.push(<div key={i} className="msgBlank" />);
+    } else {
+      out.push(<p key={i} className="msgLine">{renderInline(line)}</p>);
+    }
+  }
+  return <div className="msgContent">{out}</div>;
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -468,6 +507,13 @@ export default function App() {
     }
   };
 
+  const clearChat = useCallback(() => {
+    setChatMessages([]);
+    setChatInput("");
+    setChatDrug("");
+    setChatError("");
+  }, []);
+
   const sendDetectedToChat = (medicine) => {
     const name =
       medicine?.drug || medicine?.normalized || medicine?.query || "";
@@ -476,6 +522,22 @@ export default function App() {
     setChatDrug(name);
     sendChat(`Explain ${name} from this prescription for my context.`, name);
   };
+
+  const sendAllToChat = useCallback(
+    (medicines) => {
+      if (!medicines?.length) return;
+      const names = medicines
+        .map((m) => m.drug || m.normalized || m.query)
+        .filter(Boolean);
+      if (!names.length) return;
+      setChatDrug(names[0]);
+      setChatInput(
+        `My prescription contains: ${names.join(", ")}. Give me an overview of each medicine.`
+      );
+      setActiveView("chat");
+    },
+    []
+  );
 
   return (
     <main className="appShell">
@@ -646,6 +708,7 @@ export default function App() {
             loading={chatLoading}
             error={chatError}
             onSend={() => sendChat()}
+            onClear={clearChat}
             contextReady={contextReady}
           />
         )}
@@ -665,6 +728,7 @@ export default function App() {
             onUpload={uploadPrescription}
             onAnalyzeText={analyzeOcrText}
             onSendToChat={sendDetectedToChat}
+            onSendAllToChat={sendAllToChat}
             contextReady={contextReady}
           />
         )}
@@ -907,57 +971,94 @@ function ChatView({
   loading,
   error,
   onSend,
+  onClear,
   contextReady,
 }) {
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
   return (
     <section className="viewStack">
       <div className="chatPanel">
-        <div className="chatMessages">
-          {messages.length === 0 && (
-            <div className="emptyState">No chat messages yet.</div>
-          )}
-          {messages.map((message, index) => (
-            <div
-              key={`${message.role}-${index}`}
-              className={`message ${message.role}`}
-            >
-              <pre>{message.text}</pre>
-              {message.data?.matched_drugs?.length > 0 && (
-                <MatchedDrugStrip items={message.data.matched_drugs} />
-              )}
-            </div>
-          ))}
-          {loading && (
-            <div className="message assistant loading">Thinking...</div>
+        {/* ── Header ── */}
+        <div className="chatHeader">
+          <span className="smallCaps">Conversation</span>
+          {messages.length > 0 && (
+            <button className="ghostButton chatClearBtn" type="button" onClick={onClear}>
+              Clear
+            </button>
           )}
         </div>
 
+        {/* ── Messages ── */}
+        <div className="chatMessages">
+          {messages.length === 0 && (
+            <div className="chatEmptyState">
+              <p className="chatEmptyTitle">Ask about your medication</p>
+              <p className="muted">Try: "What are the side effects of metformin?" or upload a prescription first.</p>
+            </div>
+          )}
+          {messages.map((message, index) => {
+            const isEmergency = message.data?.is_emergency;
+            const cls = `message ${message.role}${isEmergency ? " emergency" : ""}`;
+            return (
+              <div key={`${message.role}-${index}`} className={cls}>
+                {message.role === "assistant" ? (
+                  <MessageContent text={message.text} />
+                ) : (
+                  <p className="msgLine">{message.text}</p>
+                )}
+                {message.data?.matched_drugs?.length > 0 && (
+                  <MatchedDrugStrip items={message.data.matched_drugs} />
+                )}
+                {message.data?.answer_source && (
+                  <span className="msgSource">
+                    {message.data.answer_source === "llm_grounded" ? "LLM" : "Rule-based"}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {loading && (
+            <div className="message assistant loading">
+              <span className="typingDot" /><span className="typingDot" /><span className="typingDot" />
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* ── Composer ── */}
         <div className="chatComposer">
           <input
-            className="textInput"
+            className="textInput chatDrugInput"
             value={chatDrug}
             onChange={(event) => setChatDrug(event.target.value)}
-            placeholder="Optional drug"
+            placeholder="Drug name (optional)"
           />
-          <textarea
-            value={chatInput}
-            onChange={(event) => setChatInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                onSend();
-              }
-            }}
-            placeholder="Ask a medication question"
-          />
-          <button
-            className="primaryButton"
-            type="button"
-            onClick={onSend}
-            disabled={loading || !contextReady}
-          >
-            {loading ? "Sending..." : "Send"}
-          </button>
+          <div className="chatInputRow">
+            <textarea
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  onSend();
+                }
+              }}
+              placeholder="Ask about dosage, side effects, interactions… (Enter to send)"
+            />
+            <button
+              className="primaryButton chatSendBtn"
+              type="button"
+              onClick={onSend}
+              disabled={loading || !contextReady}
+            >
+              {loading ? "…" : "Send"}
+            </button>
+          </div>
         </div>
       </div>
       {error && <Notice tone="bad">{error}</Notice>}
@@ -979,6 +1080,7 @@ function PrescriptionView({
   onUpload,
   onAnalyzeText,
   onSendToChat,
+  onSendAllToChat,
   contextReady,
 }) {
   const medicines = result?.detected_medicines || [];
@@ -1088,9 +1190,20 @@ function PrescriptionView({
           <section className="contentBlock">
             <div className="sectionHead">
               <h3>Detected Medicines</h3>
-              {medicines.length > 0 && (
-                <span className="smallCaps">{medicines.length} found</span>
-              )}
+              <div className="detectedActions">
+                {medicines.length > 0 && (
+                  <span className="smallCaps">{medicines.length} found</span>
+                )}
+                {medicines.length > 1 && (
+                  <button
+                    className="secondaryButton detectedSendAllBtn"
+                    type="button"
+                    onClick={() => onSendAllToChat(medicines)}
+                  >
+                    Chat about all {medicines.length}
+                  </button>
+                )}
+              </div>
             </div>
             {medicines.length ? (
               <div className="detectedList">
