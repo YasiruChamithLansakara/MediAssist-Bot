@@ -18,11 +18,13 @@ DATA_CSV = Path(__file__).resolve().parents[1] / "data" / "processed" / "drug_kn
 def ner_smoke():
     print("\n--- NER Smoke Test ---")
     res = extract_medical_entities(SAMPLE_TEXT, disease="diabetes", age=45, max_drugs=8, min_confidence=0.5)
-    print("NER result keys:", list(res.keys()))
-    print("Drugs (validated):")
-    for d in res.get("drugs", []):
-        print(" -", d.get("drug_name"), "(confidence=", d.get("confidence"), ")", "dosage=", d.get("dosage"))
-    print("get_drug_names():", get_drug_names(res))
+    print("NER extraction completed:", isinstance(res, dict))
+    drugs = res.get("drugs", [])
+    confidences = [float(d.get("confidence", 0) or 0) for d in drugs]
+    avg_confidence = (sum(confidences) / len(confidences)) if confidences else 0.0
+    print("Validated drug entities:", len(drugs))
+    print("Average confidence:", round(avg_confidence, 3))
+    print("Resolved drug names count:", len(get_drug_names(res)))
 
 
 def build_and_search(sample_queries=("metformin", "paracetamol"), max_rows=200):
