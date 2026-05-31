@@ -1,3 +1,4 @@
+/* Improve by Yasiru */
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
@@ -9,6 +10,7 @@ const DISEASE_OPTIONS = [
   { value: "asthma", label: "Asthma" },
   { value: "heart disease", label: "Heart Disease" },
   { value: "arthritis", label: "Arthritis" },
+  { value: "migraine", label: "Migraine" },
 ];
 
 const LS_KEYS = {
@@ -234,12 +236,16 @@ export default function App() {
       {
         label: "LLM",
         tone: dashboard.llm_available ? "online" : "offline",
-        detail: dashboard.llm_available ? "Grounded chat enabled" : "Rule-based fallback",
+        detail: dashboard.llm_available
+          ? "Grounded chat enabled"
+          : "Rule-based fallback",
       },
       {
         label: "RAG",
         tone: dashboard.rag_status?.rag_enabled ? "online" : "offline",
-        detail: dashboard.rag_status?.rag_enabled ? "Vector retrieval ready" : "Retrieval fallback",
+        detail: dashboard.rag_status?.rag_enabled
+          ? "Vector retrieval ready"
+          : "Retrieval fallback",
       },
       {
         label: "FAISS",
@@ -251,7 +257,9 @@ export default function App() {
       {
         label: "OCR",
         tone: meta.features?.prescription_ocr ? "online" : "offline",
-        detail: dashboard.ocr_runtime?.available ? "Image OCR ready" : "OCR fallback mode",
+        detail: dashboard.ocr_runtime?.available
+          ? "Image OCR ready"
+          : "OCR fallback mode",
       },
       {
         label: "NER",
@@ -556,7 +564,9 @@ export default function App() {
             <div className="sectionHead compact">
               <div>
                 <h3>Recent activity</h3>
-                <p className="muted">Last backend actions recorded by the API.</p>
+                <p className="muted">
+                  Last backend actions recorded by the API.
+                </p>
               </div>
               <span className="smallCaps">{recentActivity.length} events</span>
             </div>
@@ -564,10 +574,15 @@ export default function App() {
             {recentActivity.length ? (
               <div className="activityList">
                 {recentActivity.slice(0, 4).map((event, index) => (
-                  <div key={`${event.timestamp}-${index}`} className="activityItem">
+                  <div
+                    key={`${event.timestamp}-${index}`}
+                    className="activityItem"
+                  >
                     <div className="activityItemTop">
                       <strong>{event.kind}</strong>
-                      <span className={`statusPill ${event.success ? "online" : "offline"}`}>
+                      <span
+                        className={`statusPill ${event.success ? "online" : "offline"}`}
+                      >
                         {event.success ? "success" : "error"}
                       </span>
                     </div>
@@ -580,7 +595,10 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="emptyState">No activity recorded yet. Use lookup, chat, or OCR to populate this panel.</div>
+              <div className="emptyState">
+                No activity recorded yet. Use lookup, chat, or OCR to populate
+                this panel.
+              </div>
             )}
           </div>
         </section>
@@ -1019,65 +1037,68 @@ function PrescriptionView({
 
       {error && <Notice tone="bad">{error}</Notice>}
 
-      {result && (
-        <section className="panel">
-          <div className="sectionHead">
-            <h2>OCR Result</h2>
-            {confidencePercent !== null && (
-              <span className={`confidenceIndicator ${confidenceTone}`}>
-                {confidencePercent}% confidence
-              </span>
-            )}
-          </div>
-
-          {/* OCR Confidence Bar */}
-          {confidencePercent !== null && (
-            <div className="confidenceBar">
-              <div className="confidenceBarLabel">
-                <span className="label">OCR Extraction Confidence</span>
-                <span className="value">{confidencePercent}%</span>
-              </div>
-              <div className="confidenceBarTrack">
-                <div
-                  className={`confidenceBarFill ${confidenceTone}`}
-                  style={{ width: `${Math.min(confidencePercent, 100)}%` }}
-                />
-              </div>
-              <div className="ocrEditorHint">
-                {confidenceTone === "high" && "OCR text is highly reliable."}
-                {confidenceTone === "medium" &&
-                  "OCR text looks good but review for accuracy."}
-                {confidenceTone === "low" &&
-                  "OCR text may have errors. Please review and correct before proceeding."}
-              </div>
+      {/* Text editor — always visible so users can paste text directly */}
+      <section className="panel">
+        {/* OCR confidence bar — only after image extraction */}
+        {result && confidencePercent !== null && (
+          <div className="confidenceBar">
+            <div className="confidenceBarLabel">
+              <span className="label">OCR Extraction Confidence</span>
+              <span className="value">{confidencePercent}%</span>
             </div>
-          )}
-
-          <div className="ocrEditor">
-            <label>
-              <span>Extracted or corrected text</span>
-              <textarea
-                value={ocrText}
-                onChange={(event) => setOcrText(event.target.value)}
-                placeholder="OCR text will appear here. Edit if needed before re-detecting medicines."
+            <div className="confidenceBarTrack">
+              <div
+                className={`confidenceBarFill ${confidenceTone}`}
+                style={{ width: `${Math.min(confidencePercent, 100)}%` }}
               />
-              <div className="ocrEditorHint">
-                ✏️ Edit text above and click "Re-detect medicines" to analyze
-                changes
-              </div>
-            </label>
-            <button
-              className="secondaryButton"
-              type="button"
-              onClick={onAnalyzeText}
-              disabled={analyzeLoading || !contextReady || !ocrText.trim()}
-            >
-              {analyzeLoading ? "Analyzing..." : "Re-detect medicines"}
-            </button>
+            </div>
+            <div className="ocrEditorHint">
+              {confidenceTone === "high" && "OCR text is highly reliable."}
+              {confidenceTone === "medium" &&
+                "OCR text looks good but review for accuracy."}
+              {confidenceTone === "low" &&
+                "OCR text may have errors. Please review and correct before analyzing."}
+            </div>
           </div>
+        )}
 
+        <div className="ocrEditor">
+          <label>
+            <span>{result ? "Extracted or corrected text" : "Paste prescription text"}</span>
+            <textarea
+              value={ocrText}
+              onChange={(event) => setOcrText(event.target.value)}
+              placeholder={
+                result
+                  ? "OCR text appears here. Edit if needed, then click Re-detect medicines."
+                  : "Paste prescription text here to detect medicines — no image needed."
+              }
+            />
+            <div className="ocrEditorHint">
+              {result
+                ? "✏️ Edit above and click \"Re-detect medicines\" to update results."
+                : "✏️ Or upload a prescription image above to auto-fill this text."}
+            </div>
+          </label>
+          <button
+            className="secondaryButton"
+            type="button"
+            onClick={onAnalyzeText}
+            disabled={analyzeLoading || !contextReady || !ocrText.trim()}
+          >
+            {analyzeLoading ? "Analyzing..." : result ? "Re-detect medicines" : "Detect medicines"}
+          </button>
+        </div>
+
+        {/* Detected medicines — shown once analysis has run */}
+        {result && (
           <section className="contentBlock">
-            <h3>Detected Medicines</h3>
+            <div className="sectionHead">
+              <h3>Detected Medicines</h3>
+              {medicines.length > 0 && (
+                <span className="smallCaps">{medicines.length} found</span>
+              )}
+            </div>
             {medicines.length ? (
               <div className="detectedList">
                 {medicines.map((medicine, index) => (
@@ -1107,39 +1128,14 @@ function PrescriptionView({
               </div>
             ) : (
               <div className="emptyState">
-                No medicines detected in OCR text.
+                No medicines detected.
                 <br />
-                Try uploading a clearer prescription image or manually entering
-                medicine names.
+                Try a clearer image or check the prescription text above.
               </div>
             )}
           </section>
-        </section>
-      )}
-
-      {!result && !error && !uploadFile && (
-        <div
-          className="panel"
-          style={{ padding: "32px 16px", textAlign: "center" }}
-        >
-          <div
-            className="emptyState"
-            style={{
-              minHeight: "200px",
-              display: "grid",
-              placeItems: "center",
-            }}
-          >
-            <div>
-              <h3 style={{ marginBottom: "8px" }}>📸 Upload a Prescription</h3>
-              <p style={{ color: "var(--muted)", margin: "0" }}>
-                Choose a prescription image (JPG, PNG) to extract medicine
-                information automatically.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </section>
     </section>
   );
 }

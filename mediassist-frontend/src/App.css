@@ -1,3 +1,4 @@
+/* Improve by Yasiru */
 :root {
   --bg: radial-gradient(circle at top, #f8fbff 0%, #edf3f8 42%, #e6edf3 100%);
   --card: #ffffff;
@@ -88,6 +89,7 @@ img {
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.76);
   box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
   animation: fadeInUp 0.5s ease-out;
 }
@@ -188,7 +190,10 @@ textarea {
   background: #fff;
   color: var(--text);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 select,
@@ -237,7 +242,11 @@ textarea:focus {
   padding: 18px;
   border: 1px solid var(--border);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(248, 250, 252, 0.96) 100%
+  );
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
 }
 
@@ -275,7 +284,12 @@ textarea:focus {
 
 .statusDivider {
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.45) 50%, transparent 100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(148, 163, 184, 0.45) 50%,
+    transparent 100%
+  );
 }
 
 .activityWrap {
@@ -409,7 +423,10 @@ textarea:focus {
   padding: 0 18px;
   border-radius: 14px;
   font-weight: 800;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .primaryButton {

@@ -1,3 +1,4 @@
+# Improved by Nazifa
 from __future__ import annotations
 
 import os
@@ -42,6 +43,7 @@ SUPPORTED_DISEASES = [
     "asthma",
     "heart disease",
     "arthritis",
+    "migraine",
 ]
 
 
@@ -239,6 +241,7 @@ def build_context_highlights(*, disease: str, age: int, match: Optional[Dict[str
         "asthma": ["asthma", "bronchospasm", "wheezing", "respiratory"],
         "heart disease": ["cardiovascular", "cardiac", "stroke", "myocard", "thrombot", "heart failure", "arrhythm"],
         "arthritis": ["arthritis", "inflammation", "pain", "joint", "gi bleeding", "ulcer"],
+        "migraine": ["migraine", "headache", "triptan", "serotonin", "aura", "nausea", "photophobia", "neurological"],
     }
     kws = disease_keywords.get(d, [])
 
@@ -247,11 +250,51 @@ def build_context_highlights(*, disease: str, age: int, match: Optional[Dict[str
             f"Label includes terms related to {d}. Review warnings/contraindications for condition-specific cautions."
         )
 
-    # Extra helpful rule: NSAID + CV language for hypertension/heart disease
+    # ---- Disease-specific drug class interaction rules ----------------------
+
+    # NSAID + cardiovascular risk (hypertension / heart disease)
     if d in {"hypertension", "heart disease"}:
         if ("nsaid" in drug_class or "nonsteroidal" in blob) and _contains(blob, "cardiovascular", "thrombotic", "stroke", "myocardial"):
             highlights["disease"].append(
-                "Cardiovascular risk language detected (often relevant to some pain/anti-inflammatory medicines) — verify appropriateness for this condition."
+                "⚠️ Cardiovascular risk: NSAIDs can raise blood pressure and increase thrombotic risk — "
+                "verify this is appropriate for your condition with your doctor."
+            )
+
+    # Beta-blockers are contraindicated in asthma (can trigger bronchospasm)
+    if d == "asthma":
+        if "beta" in drug_class and ("blocker" in drug_class or "antagonist" in drug_class):
+            highlights["disease"].append(
+                "⚠️ Beta-blockers are generally contraindicated in asthma — they can cause "
+                "bronchospasm. Confirm with your doctor before use."
+            )
+        elif _contains(blob, "bronchospasm", "bronchoconstriction") and _contains(blob, "asthma", "respiratory"):
+            highlights["disease"].append(
+                "⚠️ Bronchospasm risk noted in label — important for asthma patients. Review with your doctor."
+            )
+
+    # Metformin + alcohol / contrast media for diabetes
+    if d == "diabetes":
+        if "metformin" in drug_class.lower() or "biguanide" in drug_class.lower():
+            highlights["disease"].append(
+                "Note: If this is metformin, avoid excessive alcohol use (raises lactic acidosis risk) "
+                "and inform your doctor before any contrast imaging procedure."
+            )
+
+    # NSAIDs + GI risk for arthritis patients (long-term use is common)
+    if d == "arthritis":
+        if "nsaid" in drug_class or "nonsteroidal" in blob:
+            if _contains(blob, "gastrointestinal", "gi bleeding", "ulcer", "stomach"):
+                highlights["disease"].append(
+                    "⚠️ GI bleeding/ulcer risk noted for this drug class — important for long-term "
+                    "arthritis treatment. Ask your doctor about stomach protection."
+                )
+
+    # Triptans + serotonin syndrome risk for migraine
+    if d == "migraine":
+        if "triptan" in drug_class.lower() or _contains(blob, "serotonin syndrome", "5-ht"):
+            highlights["disease"].append(
+                "⚠️ Serotonin syndrome risk: triptans interact with SSRIs/SNRIs and some other "
+                "migraine medicines. Tell your doctor all medicines you are taking."
             )
 
     # ---- General highlights

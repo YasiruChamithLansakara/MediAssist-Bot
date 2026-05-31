@@ -1,3 +1,4 @@
+# Improve by Yasiru
 import os
 import time
 import uuid
@@ -23,13 +24,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 
 from app.services.drug_lookup import init_store, lookup_drug, SUPPORTED_DISEASES
-from app.services.chat_service import build_chat_response
+from app.services.chat_engine import build_chat_response
 from app.services.ocr_service import (
     OCRDependencyError,
     OCRImageError,
     analyze_prescription_text,
     ocr_prescription_image,
     ocr_runtime_status,
+    warmup_easyocr,
 )
 from app.services.conversation_memory import (
     get_conversation_memory,
@@ -44,7 +46,7 @@ from app.services.llm_service import (
     generate_llm_response,
     get_rag_status,
 )
-from app.services.rag_vector_search import get_rag_service, is_rag_available
+# SQLite RAG removed — semantic search is FAISS-only (app/ml/faiss_store.py)
 from app.services.ner_service import ner_status
 from app.ml.faiss_store import get_faiss_store
 
@@ -214,6 +216,9 @@ async def lifespan(app: FastAPI):
             logger.warning("Drug dataframe empty — FAISS index not built")
     except Exception as exc:
         logger.warning("FAISS initialization failed: %s", exc)
+
+    # 3. EasyOCR model pre-load (background thread — avoids 20-30s delay on first scan)
+    warmup_easyocr()
 
     yield
 
@@ -432,6 +437,7 @@ def chat(request: Request, payload: ChatRequest):
             age=int(payload.age),
             matched_drugs=matched_drugs,
             conversation_history=conversation_history,
+            intent=response.get("intent", "general"),
         )
 
         if llm_response:
@@ -632,38 +638,34 @@ def get_rag_db_status(request: Request):
     }
 
 
-# RAG semantic search
+# FAISS semantic search (replaces old SQLite RAG endpoint)
 @api.post("/rag/search")
-def rag_search(request: Request, query: str = Query(..., min_length=1, max_length=500), top_k: int = Query(5, ge=1, le=20)):
+def rag_search(
+    request: Request,
+    query: str = Query(..., min_length=1, max_length=500),
+    top_k: int = Query(5, ge=1, le=20),
+):
     """
-    Perform semantic search on vectorized drug knowledge.
-    
+    Perform FAISS semantic search over the drug knowledge base.
+
     Args:
         query: Search query (drug name, symptom, condition)
-        top_k: Number of results to return
+        top_k: Number of results to return (1–20)
     """
     rid = getattr(request.state, "request_id", "")
-    
-    if not is_rag_available():
-        return _err(
-            request,
-            code="rag_unavailable",
-            message="RAG search not available",
-            status_code=503,
-        )
-    
+
     try:
-        rag_service = get_rag_service()
-        if not rag_service or not rag_service.is_available():
+        store = get_faiss_store()
+        if not store.is_ready():
             return _err(
                 request,
-                code="rag_unavailable",
-                message="RAG service initialization failed",
+                code="faiss_unavailable",
+                message="FAISS index not ready — server may still be starting up",
                 status_code=503,
             )
-        
-        results = rag_service.retrieve_context(query, top_k=top_k)
-        
+
+        results = store.search(query, top_k=top_k)
+
         return {
             "query": query,
             "top_k": top_k,
@@ -671,12 +673,12 @@ def rag_search(request: Request, query: str = Query(..., min_length=1, max_lengt
             "count": len(results),
             "request_id": rid if rid else None,
         }
-    except Exception as e:
-        logger.error(f"RAG search error: {e}")
+    except Exception as exc:
+        logger.error("FAISS search error: %s", exc)
         return _err(
             request,
-            code="rag_search_error",
-            message=f"RAG search failed: {str(e)}",
+            code="faiss_search_error",
+            message=f"Semantic search failed: {str(exc)}",
             status_code=500,
         )
 

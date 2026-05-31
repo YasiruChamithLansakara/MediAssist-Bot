@@ -1,0 +1,209 @@
+/* =========================================
+   OCR MODULE STYLES (MediAssist)
+   Extracted from App.css
+   ========================================= */
+
+/* -------- OCR Layout Grid -------- */
+.uploadGrid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+/* -------- Upload Panel -------- */
+.uploadPanel {
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* File input styling */
+.uploadPanel input[type="file"] {
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+/* Upload button */
+.uploadPanel button {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.uploadPanel button:hover {
+  background: var(--primary-dark);
+}
+
+/* -------- Preview Panel -------- */
+.previewPanel {
+  padding: 14px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* OCR image preview */
+.previewPanel img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+/* -------- OCR Editor -------- */
+.ocrEditor {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Text area for OCR correction */
+.ocrEditor textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* Action buttons */
+.ocrEditor button {
+  align-self: flex-end;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+}
+
+.ocrEditor button:hover {
+  background: var(--primary-dark);
+}
+
+/* -------- Detected Items -------- */
+.detectedItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+/* -------- Confidence Section -------- */
+.confidenceBar {
+  height: 6px;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+/* Fill states */
+.confidenceFill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.confidenceFill.high {
+  background: var(--confidence-high);
+}
+
+.confidenceFill.medium {
+  background: var(--confidence-medium);
+}
+
+.confidenceFill.low {
+  background: var(--confidence-low);
+}
+
+/* Confidence label */
+.confidenceLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* -------- Preprocessing Status Panel -------- */
+.preprocessPanel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--blue-soft);
+  color: var(--blue-text);
+  font-size: 13px;
+}
+
+/* -------- OCR Result Container -------- */
+.ocrResult {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+/* OCR extracted text block */
+.ocrText {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* -------- Error / Warning Box -------- */
+.ocrError {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--red-text);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+/* -------- OCR Tools (buttons row) -------- */
+.ocrTools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ocrTools button {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: 0.2s ease;
+}
+
+.ocrTools button:hover {
+  background: var(--surface-soft);
+}
+
+/* -------- Mobile Responsive -------- */
+@media (max-width: 900px) {
+  .uploadGrid {
+    grid-template-columns: 1fr;
+  }
+}
