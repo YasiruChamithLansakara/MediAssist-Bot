@@ -241,18 +241,11 @@ export default function App() {
           : "Rule-based fallback",
       },
       {
-        label: "RAG",
-        tone: dashboard.rag_status?.rag_enabled ? "online" : "offline",
-        detail: dashboard.rag_status?.rag_enabled
-          ? "Vector retrieval ready"
-          : "Retrieval fallback",
-      },
-      {
-        label: "FAISS",
+        label: "RAG / FAISS",
         tone: dashboard.faiss?.index_ready ? "online" : "offline",
         detail: dashboard.faiss?.index_ready
           ? `${dashboard.faiss?.vector_count || 0} vectors indexed`
-          : "Index not loaded",
+          : "Vector index not loaded",
       },
       {
         label: "OCR",
