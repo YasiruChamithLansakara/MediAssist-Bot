@@ -1221,6 +1221,18 @@ textarea:focus {
   font-size: 15px;
 }
 
+/* Drug name rendered from "• *Name*" or "**Name**" — prominent heading */
+.msgDrugName {
+  margin: 10px 0 2px;
+  padding: 5px 10px 5px 12px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  background: var(--blue-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+}
+
 .msgBullet {
   display: flex;
   gap: 8px;

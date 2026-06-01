@@ -27,18 +27,30 @@ function MessageContent({ text }) {
     } else if (/^#{1,3}\s/.test(trimmed)) {
       out.push(<p key={i} className="msgHeading">{renderInline(trimmed.replace(/^#{1,3}\s/, ""))}</p>);
     } else if (/^[•\-\*]\s?/.test(trimmed) && trimmed.length > 1) {
-      // Match: •text, - text, * text (with or without space after bullet)
       const content = trimmed.replace(/^[•\-\*]\s*/, "");
-      out.push(
-        <div key={i} className="msgBullet">
-          <span className="msgBulletDot">•</span>
-          <span>{renderInline(content)}</span>
-        </div>
-      );
+      // Drug-name line: bullet whose entire content is wrapped in * or **
+      // e.g. "• *Metformin*" or "• **Azithromycin**" → render as bold heading
+      const drugNameMatch = content.match(/^\*{1,2}([^*]+)\*{1,2}$/);
+      if (drugNameMatch) {
+        out.push(<p key={i} className="msgDrugName">{drugNameMatch[1].trim()}</p>);
+      } else {
+        out.push(
+          <div key={i} className="msgBullet">
+            <span className="msgBulletDot">•</span>
+            <span>{renderInline(content)}</span>
+          </div>
+        );
+      }
     } else if (trimmed === "") {
       out.push(<div key={i} className="msgBlank" />);
     } else {
-      out.push(<p key={i} className="msgLine">{renderInline(trimmed)}</p>);
+      // A line that is entirely **bold** (e.g. "**Metformin 500mg**") → drug heading
+      const boldOnlyMatch = trimmed.match(/^\*{2}([^*]+)\*{2}$/);
+      if (boldOnlyMatch) {
+        out.push(<p key={i} className="msgDrugName">{boldOnlyMatch[1].trim()}</p>);
+      } else {
+        out.push(<p key={i} className="msgLine">{renderInline(trimmed)}</p>);
+      }
     }
   }
   return <div className="msgContent">{out}</div>;
