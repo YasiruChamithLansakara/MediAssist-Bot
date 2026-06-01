@@ -1,6 +1,7 @@
 /* Improve by Yasiru */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import mediassistLogo from "./assets/mediassist.svg";
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
 // Handles the subset of markdown that the LLM produces:
@@ -549,10 +550,14 @@ export default function App() {
         {/* ── App header ── */}
         <header className="topBar">
           <div className="topBarBrand">
-            <div className="eyebrow">MediAssist Bot</div>
-            <h1>Medication assistant</h1>
+            <img src={mediassistLogo} alt="MediAssist logo" className="appLogo" />
+            <div>
+              <div className="eyebrow">MediAssist Bot</div>
+              <h1>Medication assistant</h1>
+            </div>
           </div>
-          <div className={`backendDot ${backendStatus}`} title={backendStatus === "online" ? "Backend online" : "Backend offline"} />
+          <div className={`backendDot ${backendStatus}`}
+            title={backendStatus === "online" ? "Backend online" : "Backend offline"} />
         </header>
 
         {/* ── Patient context (3-column compact) ── */}
@@ -961,7 +966,10 @@ function ChatView({
       <div className="chatPanel">
         {/* ── Header ── */}
         <div className="chatHeader">
-          <span className="chatHeaderLabel">Chat</span>
+          <div className="chatHeaderLeft">
+            <span className="chatHeaderIcon">💬</span>
+            <span className="chatHeaderLabel">Chat</span>
+          </div>
           {messages.length > 0 && (
             <button className="chatClearBtn" type="button" onClick={onClear}>
               Clear chat
