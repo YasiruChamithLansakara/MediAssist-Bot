@@ -102,7 +102,8 @@ class _OpenAIBackend:
             logger.debug("No LLM_API_KEY — OpenAI embeddings skipped")
             return
         try:
-            import openai
+            import importlib
+            openai = importlib.import_module("openai")
             self._client = openai.OpenAI(api_key=_OPENAI_KEY)
             self._ready = True
             logger.info(
