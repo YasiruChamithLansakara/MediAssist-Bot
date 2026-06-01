@@ -102,7 +102,8 @@ class _OpenAIBackend:
             logger.debug("No LLM_API_KEY — OpenAI embeddings skipped")
             return
         try:
-            import openai
+            import importlib
+            openai = importlib.import_module("openai")
             self._client = openai.OpenAI(api_key=_OPENAI_KEY)
             self._ready = True
             logger.info(
@@ -290,6 +291,48 @@ def normalize_vectors(arr: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(arr, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1.0, norms)
     return (arr / norms).astype(np.float32)
+
+
+def warmup_embeddings() -> None:
+    """
+    Pre-load sentence-transformers in a background thread at server startup.
+
+    When FAISS loads from disk it skips building vectors (no model needed).
+    Without this warmup the embedding model loads lazily on the FIRST semantic
+    search call — triggering 30+ HuggingFace HTTP checks inside a live request
+    and causing a ~50-second response / client timeout.
+    """
+    import logging
+    import threading
+
+    log = logging.getLogger("mediassist.embeddings")
+
+    def _load() -> None:
+        log.info("EmbeddingService: warming up sentence-transformers in background …")
+        try:
+            svc = _get_service()
+            if svc.is_ready():
+                embed_single("warmup")   # forces tokenizer + model fully into memory
+                log.info(
+                    "EmbeddingService: %s ready (dim=%d)",
+                    svc.backend_name,
+                    svc.get_dimension(),
+                )
+            else:
+                log.warning("EmbeddingService: no semantic backend available")
+        except Exception as exc:
+            log.warning("EmbeddingService warmup failed: %s", exc)
+
+    threading.Thread(target=_load, daemon=True, name="embeddings-warmup").start()
+
+
+def is_available() -> bool:
+    """Return True if a semantic (non-TF-IDF) embedding backend is ready."""
+    try:
+        svc = _get_service()
+        return svc.is_ready() and "TFIDF" not in svc.backend_name
+    except Exception:
+        return False
 
 
 def is_available() -> bool:

@@ -1,6 +1,48 @@
 /* Improve by Yasiru */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import mediassistLogo from "./assets/mediassist.svg";
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+// Handles the subset of markdown that the LLM produces:
+//   **bold**, *italic*, • / - bullet lines, --- dividers, # headings
+function renderInline(text) {
+  const parts = text.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**"))
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*"))
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    return part || null;
+  });
+}
+
+function MessageContent({ text }) {
+  const lines = (text || "").split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (/^---+$/.test(trimmed)) {
+      out.push(<hr key={i} className="msgDivider" />);
+    } else if (/^#{1,3}\s/.test(trimmed)) {
+      out.push(<p key={i} className="msgHeading">{renderInline(trimmed.replace(/^#{1,3}\s/, ""))}</p>);
+    } else if (/^[•\-\*]\s?/.test(trimmed) && trimmed.length > 1) {
+      // Match: •text, - text, * text (with or without space after bullet)
+      const content = trimmed.replace(/^[•\-\*]\s*/, "");
+      out.push(
+        <div key={i} className="msgBullet">
+          <span className="msgBulletDot">•</span>
+          <span>{renderInline(content)}</span>
+        </div>
+      );
+    } else if (trimmed === "") {
+      out.push(<div key={i} className="msgBlank" />);
+    } else {
+      out.push(<p key={i} className="msgLine">{renderInline(trimmed)}</p>);
+    }
+  }
+  return <div className="msgContent">{out}</div>;
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -132,6 +174,8 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
+  const [systemPanelOpen, setSystemPanelOpen] = useState(false);
+
   const [uploadFile, setUploadFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [ocrLoading, setOcrLoading] = useState(false);
@@ -241,18 +285,11 @@ export default function App() {
           : "Rule-based fallback",
       },
       {
-        label: "RAG",
-        tone: dashboard.rag_status?.rag_enabled ? "online" : "offline",
-        detail: dashboard.rag_status?.rag_enabled
-          ? "Vector retrieval ready"
-          : "Retrieval fallback",
-      },
-      {
-        label: "FAISS",
+        label: "RAG / FAISS",
         tone: dashboard.faiss?.index_ready ? "online" : "offline",
         detail: dashboard.faiss?.index_ready
           ? `${dashboard.faiss?.vector_count || 0} vectors indexed`
-          : "Index not loaded",
+          : "Vector index not loaded",
       },
       {
         label: "OCR",
@@ -364,7 +401,7 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },
-        20000,
+        45000,  // 45 s — Groq LLM + FAISS search can take 10-15 s; first call loads embeddings
       );
       setChatMessages((items) => [
         ...items,
@@ -475,6 +512,13 @@ export default function App() {
     }
   };
 
+  const clearChat = useCallback(() => {
+    setChatMessages([]);
+    setChatInput("");
+    setChatDrug("");
+    setChatError("");
+  }, []);
+
   const sendDetectedToChat = (medicine) => {
     const name =
       medicine?.drug || medicine?.normalized || medicine?.query || "";
@@ -484,138 +528,132 @@ export default function App() {
     sendChat(`Explain ${name} from this prescription for my context.`, name);
   };
 
+  const sendAllToChat = useCallback(
+    (medicines) => {
+      if (!medicines?.length) return;
+      const names = medicines
+        .map((m) => m.drug || m.normalized || m.query)
+        .filter(Boolean);
+      if (!names.length) return;
+      setChatDrug(names[0]);
+      setChatInput(
+        `My prescription contains: ${names.join(", ")}. Give me an overview of each medicine.`
+      );
+      setActiveView("chat");
+    },
+    []
+  );
+
   return (
     <main className="appShell">
       <section className="workspace">
+        {/* ── App header ── */}
         <header className="topBar">
-          <div>
-            <div className="eyebrow">MediAssist Bot</div>
-            <h1>Medication assistant</h1>
-          </div>
-          <div className="topBarMeta">
-            <div className={`backendBadge ${backendStatus}`}>
-              {backendStatus === "online"
-                ? "Backend online"
-                : backendStatus === "offline"
-                  ? "Backend offline"
-                  : "Checking backend"}
+          <div className="topBarBrand">
+            <img src={mediassistLogo} alt="MediAssist logo" className="appLogo" />
+            <div>
+              <div className="eyebrow">MediAssist Bot</div>
+              <h1>Medication assistant</h1>
             </div>
-            <div className="apiBadge">{API_BASE}</div>
           </div>
+          <div className={`backendDot ${backendStatus}`}
+            title={backendStatus === "online" ? "Backend online" : "Backend offline"} />
         </header>
 
+        {/* ── Patient context (3-column compact) ── */}
         <section className="contextPanel" aria-label="Patient context">
-          <label>
-            <span>Disease</span>
-            <select
-              value={disease}
-              onChange={(event) =>
-                setDisease(normalizeDisease(event.target.value))
-              }
-            >
-              <option value="">Select disease</option>
-              {DISEASE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
+          <label className="contextField">
+            <span>Condition</span>
+            <select value={disease} onChange={(e) => setDisease(normalizeDisease(e.target.value))}>
+              <option value="">Select…</option>
+              {DISEASE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </label>
-          <label>
+          <label className="contextField">
             <span>Age</span>
-            <input
-              type="number"
-              min="1"
-              max="120"
-              inputMode="numeric"
-              value={age}
-              onChange={(event) => setAge(event.target.value)}
-              placeholder="1-120"
-            />
+            <input type="number" min="1" max="120" inputMode="numeric" value={age}
+              onChange={(e) => setAge(e.target.value)} placeholder="1–120" />
           </label>
-          <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
-            {contextReady ? "Context ready" : contextMessage}
+          <div className={`contextBadge ${contextReady ? "ready" : "needs"}`}>
+            {contextReady ? "✓ Ready" : contextMessage}
           </div>
         </section>
 
+        {/* ── System status (collapsible) ── */}
         <section className="systemPanel" aria-label="System status">
-          <div className="sectionHead">
-            <div>
-              <h2>System status</h2>
-              <p className="muted">Live backend and feature availability.</p>
-            </div>
-            <span className="smallCaps">Runtime</span>
-          </div>
-          <div className="statusGrid">
-            {featureStatus.map((item) => (
-              <div key={item.label} className="statusCard">
-                <div className="statusCardTop">
-                  <strong>{item.label}</strong>
-                  <span className={`statusPill ${item.tone}`}>{item.tone}</span>
-                </div>
-                <p>{item.detail}</p>
+          <button className="systemPanelToggle" type="button"
+            onClick={() => setSystemPanelOpen((v) => !v)}>
+            <div className="systemPanelToggleLeft">
+              <span className={`backendDot ${backendStatus}`} />
+              <span className="systemPanelTitle">System status</span>
+              <div className="statusMiniRow">
+                {featureStatus.slice(0, 4).map((s) => (
+                  <span key={s.label} className={`miniPill ${s.tone}`}>{s.label}</span>
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div className="statusDivider" />
-
-          <div className="activityWrap">
-            <div className="sectionHead compact">
-              <div>
-                <h3>Recent activity</h3>
-                <p className="muted">
-                  Last backend actions recorded by the API.
-                </p>
-              </div>
-              <span className="smallCaps">{recentActivity.length} events</span>
             </div>
+            <span className="systemPanelChevron">{systemPanelOpen ? "▲" : "▼"}</span>
+          </button>
 
-            {recentActivity.length ? (
-              <div className="activityList">
-                {recentActivity.slice(0, 4).map((event, index) => (
-                  <div
-                    key={`${event.timestamp}-${index}`}
-                    className="activityItem"
-                  >
-                    <div className="activityItemTop">
-                      <strong>{event.kind}</strong>
-                      <span
-                        className={`statusPill ${event.success ? "online" : "offline"}`}
-                      >
-                        {event.success ? "success" : "error"}
-                      </span>
+          {systemPanelOpen && (
+            <div className="systemPanelBody">
+              <div className="statusGrid">
+                {featureStatus.map((item) => (
+                  <div key={item.label} className="statusCard">
+                    <div className="statusCardTop">
+                      <strong>{item.label}</strong>
+                      <span className={`statusPill ${item.tone}`}>{item.tone}</span>
                     </div>
-                    <p>{event.detail || "Recorded event"}</p>
-                    <div className="activityMeta">
-                      <span>{event.timestamp}</span>
-                      <span>{event.status_code || "-"}</span>
-                    </div>
+                    <p>{item.detail}</p>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="emptyState">
-                No activity recorded yet. Use lookup, chat, or OCR to populate
-                this panel.
+
+              <div className="statusDivider" />
+
+              <div className="activityWrap">
+                <div className="sectionHead compact">
+                  <h3>Recent activity</h3>
+                  <span className="smallCaps">{recentActivity.length} events</span>
+                </div>
+                {recentActivity.length ? (
+                  <div className="activityList">
+                    {recentActivity.slice(0, 4).map((event, index) => (
+                      <div key={`${event.timestamp}-${index}`} className="activityItem">
+                        <div className="activityItemTop">
+                          <strong>{event.kind}</strong>
+                          <span className={`statusPill ${event.success ? "online" : "offline"}`}>
+                            {event.success ? "ok" : "err"}
+                          </span>
+                        </div>
+                        <p>{event.detail || "Recorded event"}</p>
+                        <div className="activityMeta">
+                          <span>{event.timestamp}</span>
+                          <span>{event.status_code || "-"}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted" style={{padding:"8px 0"}}>No activity yet.</p>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
 
+        {/* ── Tabs ── */}
         <nav className="tabs" aria-label="MediAssist views">
           {[
-            ["lookup", "Lookup"],
-            ["chat", "Chat"],
-            ["prescription", "Prescription"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
+            ["lookup", "🔍", "Lookup"],
+            ["chat",   "💬", "Chat"],
+            ["prescription", "📋", "Prescription"],
+          ].map(([id, icon, label]) => (
+            <button key={id} type="button"
               className={activeView === id ? "tab active" : "tab"}
-              onClick={() => setActiveView(id)}
-            >
-              {label}
+              onClick={() => setActiveView(id)}>
+              <span className="tabIcon">{icon}</span>
+              <span>{label}</span>
             </button>
           ))}
         </nav>
@@ -653,6 +691,7 @@ export default function App() {
             loading={chatLoading}
             error={chatError}
             onSend={() => sendChat()}
+            onClear={clearChat}
             contextReady={contextReady}
           />
         )}
@@ -672,33 +711,13 @@ export default function App() {
             onUpload={uploadPrescription}
             onAnalyzeText={analyzeOcrText}
             onSendToChat={sendDetectedToChat}
+            onSendAllToChat={sendAllToChat}
             contextReady={contextReady}
           />
         )}
 
-        {anyLoading && (
-          <div className="loadingContainer">
-            <div className="spinner"></div>
-            <div className="loadingText">Searching drug database...</div>
-          </div>
-        )}
-
-        {lookupResponse?.query && !anyLoading && (
-          <div className="apiLine">
-            <span className="muted">API:</span>{" "}
-            <a
-              href={`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-            </a>
-          </div>
-        )}
-
         <footer className="footer">
-          Educational demo only. Confirm medication decisions with a licensed
-          clinician.
+          Educational demo only · Confirm all medication decisions with a licensed clinician
         </footer>
       </section>
     </main>
@@ -735,23 +754,25 @@ function LookupView({
 
   return (
     <section className="viewStack">
-      <div className="toolRow">
+      {/* ── Unified search bar ── */}
+      <div className="searchBar">
+        <span className="searchIcon">🔍</span>
         <input
-          className="textInput"
+          className="searchInput"
           value={drug}
           onChange={(event) => setDrug(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") onLookup();
-          }}
-          placeholder="Drug name or brand"
+          onKeyDown={(event) => { if (event.key === "Enter") onLookup(); }}
+          placeholder="Enter drug name or brand (e.g. Metformin, Aspirin)"
+          autoComplete="off"
+          spellCheck="false"
         />
         <button
-          className="primaryButton"
+          className="searchBtn"
           type="button"
           onClick={onLookup}
           disabled={loading || !contextReady}
         >
-          {loading ? "Searching..." : "Search"}
+          {loading ? "Searching…" : "Search"}
         </button>
       </div>
 
@@ -901,6 +922,23 @@ function LookupView({
           )}
         </section>
       )}
+
+      {/* empty state when nothing searched yet */}
+      {!response && !error && (
+        <div className="lookupEmptyState">
+          <div className="lookupEmptyIcon">💊</div>
+          <p className="lookupEmptyTitle">Search the drug knowledge base</p>
+          <p className="muted">Type a generic name, brand name, or partial spelling — fuzzy matching handles typos.</p>
+          <div className="lookupEmptyHints">
+            {["Metformin", "Lisinopril", "Salbutamol", "Aspirin", "Sumatriptan"].map((hint) => (
+              <button key={hint} type="button" className="hintChip"
+                onClick={() => { setDrug(hint); onLookup(); }}
+                disabled={!contextReady}
+              >{hint}</button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -914,57 +952,97 @@ function ChatView({
   loading,
   error,
   onSend,
+  onClear,
   contextReady,
 }) {
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
   return (
     <section className="viewStack">
       <div className="chatPanel">
-        <div className="chatMessages">
-          {messages.length === 0 && (
-            <div className="emptyState">No chat messages yet.</div>
-          )}
-          {messages.map((message, index) => (
-            <div
-              key={`${message.role}-${index}`}
-              className={`message ${message.role}`}
-            >
-              <pre>{message.text}</pre>
-              {message.data?.matched_drugs?.length > 0 && (
-                <MatchedDrugStrip items={message.data.matched_drugs} />
-              )}
-            </div>
-          ))}
-          {loading && (
-            <div className="message assistant loading">Thinking...</div>
+        {/* ── Header ── */}
+        <div className="chatHeader">
+          <div className="chatHeaderLeft">
+            <span className="chatHeaderIcon">💬</span>
+            <span className="chatHeaderLabel">Chat</span>
+          </div>
+          {messages.length > 0 && (
+            <button className="chatClearBtn" type="button" onClick={onClear}>
+              Clear chat
+            </button>
           )}
         </div>
 
+        {/* ── Messages ── */}
+        <div className="chatMessages">
+          {messages.length === 0 && (
+            <div className="chatEmptyState">
+              <p className="chatEmptyTitle">Ask about your medication</p>
+              <p className="muted">Try: "What are the side effects of metformin?" or upload a prescription first.</p>
+            </div>
+          )}
+          {messages.map((message, index) => {
+            const isEmergency = message.data?.is_emergency;
+            const cls = `message ${message.role}${isEmergency ? " emergency" : ""}`;
+            return (
+              <div key={`${message.role}-${index}`} className={cls}>
+                {message.role === "assistant" ? (
+                  <MessageContent text={message.text} />
+                ) : (
+                  <p className="msgLine">{message.text}</p>
+                )}
+                {message.data?.matched_drugs?.length > 0 && (
+                  <MatchedDrugStrip items={message.data.matched_drugs} />
+                )}
+                {message.data?.answer_source && (
+                  <span className="msgSource">
+                    {message.data.answer_source === "llm_grounded" ? "LLM" : "Rule-based"}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {loading && (
+            <div className="message assistant loading">
+              <span className="typingDot" /><span className="typingDot" /><span className="typingDot" />
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* ── Composer ── */}
         <div className="chatComposer">
           <input
-            className="textInput"
+            className="textInput chatDrugInput"
             value={chatDrug}
             onChange={(event) => setChatDrug(event.target.value)}
-            placeholder="Optional drug"
+            placeholder="Drug name (optional)"
           />
-          <textarea
-            value={chatInput}
-            onChange={(event) => setChatInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                onSend();
-              }
-            }}
-            placeholder="Ask a medication question"
-          />
-          <button
-            className="primaryButton"
-            type="button"
-            onClick={onSend}
-            disabled={loading || !contextReady}
-          >
-            {loading ? "Sending..." : "Send"}
-          </button>
+          <div className="chatInputRow">
+            <textarea
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  onSend();
+                }
+              }}
+              placeholder="Ask about dosage, side effects, interactions… (Enter to send)"
+            />
+            <button
+              className="primaryButton chatSendBtn"
+              type="button"
+              onClick={onSend}
+              disabled={loading || !contextReady}
+            >
+              {loading ? "…" : "Send"}
+            </button>
+          </div>
         </div>
       </div>
       {error && <Notice tone="bad">{error}</Notice>}
@@ -986,6 +1064,7 @@ function PrescriptionView({
   onUpload,
   onAnalyzeText,
   onSendToChat,
+  onSendAllToChat,
   contextReady,
 }) {
   const medicines = result?.detected_medicines || [];
@@ -1041,24 +1120,22 @@ function PrescriptionView({
       <section className="panel">
         {/* OCR confidence bar — only after image extraction */}
         {result && confidencePercent !== null && (
-          <div className="confidenceBar">
-            <div className="confidenceBarLabel">
-              <span className="label">OCR Extraction Confidence</span>
-              <span className="value">{confidencePercent}%</span>
+          <div className={`ocrConfidenceBanner ${confidenceTone}`}>
+            <div className="ocrConfidenceTop">
+              <span className="ocrConfidenceLabel">OCR Confidence</span>
+              <span className="ocrConfidenceScore">{confidencePercent}%</span>
             </div>
-            <div className="confidenceBarTrack">
+            <div className="ocrConfidenceTrack">
               <div
-                className={`confidenceBarFill ${confidenceTone}`}
+                className="ocrConfidenceFill"
                 style={{ width: `${Math.min(confidencePercent, 100)}%` }}
               />
             </div>
-            <div className="ocrEditorHint">
-              {confidenceTone === "high" && "OCR text is highly reliable."}
-              {confidenceTone === "medium" &&
-                "OCR text looks good but review for accuracy."}
-              {confidenceTone === "low" &&
-                "OCR text may have errors. Please review and correct before analyzing."}
-            </div>
+            <p className="ocrConfidenceHint">
+              {confidenceTone === "high" && "✓ Text is highly reliable — proceed to detect medicines."}
+              {confidenceTone === "medium" && "⚡ Looks good — review a few words before re-detecting."}
+              {confidenceTone === "low" && "⚠ Low confidence — correct the text above before analyzing."}
+            </p>
           </div>
         )}
 
@@ -1095,9 +1172,20 @@ function PrescriptionView({
           <section className="contentBlock">
             <div className="sectionHead">
               <h3>Detected Medicines</h3>
-              {medicines.length > 0 && (
-                <span className="smallCaps">{medicines.length} found</span>
-              )}
+              <div className="detectedActions">
+                {medicines.length > 0 && (
+                  <span className="smallCaps">{medicines.length} found</span>
+                )}
+                {medicines.length > 1 && (
+                  <button
+                    className="secondaryButton detectedSendAllBtn"
+                    type="button"
+                    onClick={() => onSendAllToChat(medicines)}
+                  >
+                    Chat about all {medicines.length}
+                  </button>
+                )}
+              </div>
             </div>
             {medicines.length ? (
               <div className="detectedList">
@@ -1106,18 +1194,18 @@ function PrescriptionView({
                     className="detectedItem"
                     key={`${medicine.drug}-${index}`}
                   >
-                    <div>
-                      <strong>
+                    <div className="detectedItemInfo">
+                      <strong className="detectedDrugName">
                         {medicine.drug || medicine.normalized || medicine.query}
                       </strong>
-                      <span>
+                      <span className="detectedDrugMeta">
                         {[medicine.dosage, medicine.frequency, medicine.route]
                           .filter(Boolean)
-                          .join(" | ") || "No dosage pattern detected"}
+                          .join(" · ") || "No dosage detected"}
                       </span>
                     </div>
                     <button
-                      className="secondaryButton"
+                      className="secondaryButton detectedChatBtn"
                       type="button"
                       onClick={() => onSendToChat(medicine)}
                     >
