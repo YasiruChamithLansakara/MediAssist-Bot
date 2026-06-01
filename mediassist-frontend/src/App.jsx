@@ -792,23 +792,25 @@ function LookupView({
 
   return (
     <section className="viewStack">
-      <div className="toolRow">
+      {/* ── Unified search bar ── */}
+      <div className="searchBar">
+        <span className="searchIcon">🔍</span>
         <input
-          className="textInput"
+          className="searchInput"
           value={drug}
           onChange={(event) => setDrug(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") onLookup();
-          }}
-          placeholder="Drug name or brand"
+          onKeyDown={(event) => { if (event.key === "Enter") onLookup(); }}
+          placeholder="Enter drug name or brand (e.g. Metformin, Aspirin)"
+          autoComplete="off"
+          spellCheck="false"
         />
         <button
-          className="primaryButton"
+          className="searchBtn"
           type="button"
           onClick={onLookup}
           disabled={loading || !contextReady}
         >
-          {loading ? "Searching..." : "Search"}
+          {loading ? "Searching…" : "Search"}
         </button>
       </div>
 
@@ -958,6 +960,23 @@ function LookupView({
           )}
         </section>
       )}
+
+      {/* empty state when nothing searched yet */}
+      {!response && !error && (
+        <div className="lookupEmptyState">
+          <div className="lookupEmptyIcon">💊</div>
+          <p className="lookupEmptyTitle">Search the drug knowledge base</p>
+          <p className="muted">Type a generic name, brand name, or partial spelling — fuzzy matching handles typos.</p>
+          <div className="lookupEmptyHints">
+            {["Metformin", "Lisinopril", "Salbutamol", "Aspirin", "Sumatriptan"].map((hint) => (
+              <button key={hint} type="button" className="hintChip"
+                onClick={() => { setDrug(hint); onLookup(); }}
+                disabled={!contextReady}
+              >{hint}</button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -985,10 +1004,10 @@ function ChatView({
       <div className="chatPanel">
         {/* ── Header ── */}
         <div className="chatHeader">
-          <span className="smallCaps">Conversation</span>
+          <span className="chatHeaderLabel">Chat</span>
           {messages.length > 0 && (
-            <button className="ghostButton chatClearBtn" type="button" onClick={onClear}>
-              Clear
+            <button className="chatClearBtn" type="button" onClick={onClear}>
+              Clear chat
             </button>
           )}
         </div>
@@ -1136,24 +1155,22 @@ function PrescriptionView({
       <section className="panel">
         {/* OCR confidence bar — only after image extraction */}
         {result && confidencePercent !== null && (
-          <div className="confidenceBar">
-            <div className="confidenceBarLabel">
-              <span className="label">OCR Extraction Confidence</span>
-              <span className="value">{confidencePercent}%</span>
+          <div className={`ocrConfidenceBanner ${confidenceTone}`}>
+            <div className="ocrConfidenceTop">
+              <span className="ocrConfidenceLabel">OCR Confidence</span>
+              <span className="ocrConfidenceScore">{confidencePercent}%</span>
             </div>
-            <div className="confidenceBarTrack">
+            <div className="ocrConfidenceTrack">
               <div
-                className={`confidenceBarFill ${confidenceTone}`}
+                className="ocrConfidenceFill"
                 style={{ width: `${Math.min(confidencePercent, 100)}%` }}
               />
             </div>
-            <div className="ocrEditorHint">
-              {confidenceTone === "high" && "OCR text is highly reliable."}
-              {confidenceTone === "medium" &&
-                "OCR text looks good but review for accuracy."}
-              {confidenceTone === "low" &&
-                "OCR text may have errors. Please review and correct before analyzing."}
-            </div>
+            <p className="ocrConfidenceHint">
+              {confidenceTone === "high" && "✓ Text is highly reliable — proceed to detect medicines."}
+              {confidenceTone === "medium" && "⚡ Looks good — review a few words before re-detecting."}
+              {confidenceTone === "low" && "⚠ Low confidence — correct the text above before analyzing."}
+            </p>
           </div>
         )}
 
@@ -1212,18 +1229,18 @@ function PrescriptionView({
                     className="detectedItem"
                     key={`${medicine.drug}-${index}`}
                   >
-                    <div>
-                      <strong>
+                    <div className="detectedItemInfo">
+                      <strong className="detectedDrugName">
                         {medicine.drug || medicine.normalized || medicine.query}
                       </strong>
-                      <span>
+                      <span className="detectedDrugMeta">
                         {[medicine.dosage, medicine.frequency, medicine.route]
                           .filter(Boolean)
-                          .join(" | ") || "No dosage pattern detected"}
+                          .join(" · ") || "No dosage detected"}
                       </span>
                     </div>
                     <button
-                      className="secondaryButton"
+                      className="secondaryButton detectedChatBtn"
                       type="button"
                       onClick={() => onSendToChat(medicine)}
                     >
