@@ -264,6 +264,15 @@ def _easyocr_single_image(image) -> Tuple[str, Optional[float]]:
     return text, confidence
 
 
+def _is_numeric(value) -> bool:
+    """Return True if value can be safely converted to float."""
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 _MEDICAL_VOCAB_RE = re.compile(
     r"\b(mg|ml|mcg|tablet|tab|cap|capsule|dose|oral|dosage|twice|daily|bd|tds|od|"
     r"rx|refill|dispense|solution|inj|injection|apply|topical|drops|syrup|"
@@ -353,21 +362,26 @@ def _ocr_with_confidence(image_bytes: bytes) -> Tuple[str, Optional[float], Opti
         # Extra candidate: PSM 11 (sparse text) at 0° — handles complex multi-zone
         # forms (stamps, multi-column, handwritten annotations) better than PSM 3
         try:
-            text11, conf11 = pytesseract.image_to_string(
-                tess_image, config="--psm 11 --oem 3"
-            ), None
+            text11 = pytesseract.image_to_string(tess_image, config="--psm 11 --oem 3")
             data11 = pytesseract.image_to_data(
                 tess_image, config="--psm 11 --oem 3",
                 output_type=pytesseract.Output.DICT,
             )
-            vals = [float(v) for v in data11.get("conf", []) if float(v) >= 40]
+            # Filter to words Tesseract is confident about before averaging
+            vals = [float(v) for v in data11.get("conf", [])
+                    if _is_numeric(v) and float(v) >= 40]
             conf11 = round(sum(vals) / len(vals) / 100.0, 4) if vals else None
             text11 = _clean_ocr_text(text11)
             candidates.append(
                 (_ocr_candidate_score(text11, conf11), text11, conf11, "tesseract-sparse")
             )
+        except pytesseract.TesseractNotFoundError as exc:
+            # Re-raise so the caller knows Tesseract is missing (same as angle sweep)
+            raise OCRDependencyError(
+                "Tesseract is not installed or not in PATH. Install it or set TESSERACT_CMD."
+            ) from exc
         except Exception:
-            pass
+            pass  # Any other error (e.g. image too small for PSM 11): skip candidate
 
     # ── EasyOCR — grayscale image, no binarization ────────────────────────
     if _easyocr_available():

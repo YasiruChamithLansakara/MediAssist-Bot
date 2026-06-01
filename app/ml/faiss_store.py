@@ -116,21 +116,24 @@ class FAISSStore:
         if k == 0:
             return []
 
+        # Hold the lock across both the FAISS search AND the metadata reads.
+        # A concurrent build() replaces _index and _metadata atomically under
+        # this same lock; releasing it between the two accesses would allow
+        # _metadata to be swapped, making FAISS-returned indices stale.
         with self._lock:
             scores, indices = self._index.search(q_vec, k)
-
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self._metadata):
-                continue
-            meta = self._metadata[idx]
-            results.append({
-                "drug_id":     meta.get("drug_id", ""),
-                "drug_name":   meta.get("drug_name", ""),
-                "generic_name": meta.get("generic_name", ""),
-                "similarity":  round(float(score), 4),
-                "metadata":    meta,
-            })
+            results = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < 0 or idx >= len(self._metadata):
+                    continue
+                meta = self._metadata[idx]
+                results.append({
+                    "drug_id":     meta.get("drug_id", ""),
+                    "drug_name":   meta.get("drug_name", ""),
+                    "generic_name": meta.get("generic_name", ""),
+                    "similarity":  round(float(score), 4),
+                    "metadata":    meta,
+                })
 
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results

@@ -596,13 +596,14 @@ class LLMService:
         age: int,
         matched_drugs: List[Dict[str, Any]],
         conversation_history: List[Dict[str, Any]],
+        intent: str = "general",
     ) -> Iterator[str]:
         """
         Streaming response generator.
         Falls back to a single-shot response if streaming not supported.
         """
         answer = self.generate_response(
-            message, disease, age, matched_drugs, conversation_history
+            message, disease, age, matched_drugs, conversation_history, intent=intent
         )
         if answer:
             yield answer
