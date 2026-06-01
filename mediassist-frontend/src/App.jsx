@@ -365,12 +365,20 @@ export default function App() {
 
   const runLookup = () => lookupDrugWithValue(drug);
 
+  const clearLookup = () => {
+    setDrug("");
+    setLookupResponse(null);
+    setLookupError("");
+    resetLookupToggles();
+  };
+
   const applySuggestion = (suggestion) => {
     setDrug(suggestion);
     lookupDrugWithValue(suggestion);
   };
 
   const sendChat = async (messageOverride, drugOverride) => {
+    if (chatLoading) return;                   // race-condition guard — ignore double-submit
     const message = String(messageOverride ?? chatInput).trim();
     const d = normalizeDisease(disease);
     const a = Number(age);
@@ -464,6 +472,9 @@ export default function App() {
       );
       setOcrResult(data);
       setOcrText(data.ocr?.text || "");
+      // Reset the file input so the same image can be re-submitted if needed.
+      // Without this, selecting the same file again won't fire onChange.
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
       setOcrError(error?.message || "Prescription OCR failed.");
     } finally {
@@ -582,7 +593,9 @@ export default function App() {
         {/* ── System status (collapsible) ── */}
         <section className="systemPanel" aria-label="System status">
           <button className="systemPanelToggle" type="button"
-            onClick={() => setSystemPanelOpen((v) => !v)}>
+            onClick={() => setSystemPanelOpen((v) => !v)}
+            aria-expanded={systemPanelOpen}
+            aria-controls="system-panel-body">
             <div className="systemPanelToggleLeft">
               <span className={`backendDot ${backendStatus}`} />
               <span className="systemPanelTitle">System status</span>
@@ -596,7 +609,7 @@ export default function App() {
           </button>
 
           {systemPanelOpen && (
-            <div className="systemPanelBody">
+            <div className="systemPanelBody" id="system-panel-body">
               <div className="statusGrid">
                 {featureStatus.map((item) => (
                   <div key={item.label} className="statusCard">
@@ -651,8 +664,9 @@ export default function App() {
           ].map(([id, icon, label]) => (
             <button key={id} type="button"
               className={activeView === id ? "tab active" : "tab"}
-              onClick={() => setActiveView(id)}>
-              <span className="tabIcon">{icon}</span>
+              onClick={() => setActiveView(id)}
+              aria-current={activeView === id ? "page" : undefined}>
+              <span className="tabIcon" aria-hidden="true">{icon}</span>
               <span>{label}</span>
             </button>
           ))}
@@ -675,6 +689,7 @@ export default function App() {
             openSections={openSections}
             setOpenSections={setOpenSections}
             onLookup={runLookup}
+            onClear={clearLookup}
             onSuggestion={applySuggestion}
             onUseInChat={useLookupInChat}
             contextReady={contextReady}
@@ -740,6 +755,7 @@ function LookupView({
   openSections,
   setOpenSections,
   onLookup,
+  onClear,
   onSuggestion,
   onUseInChat,
   contextReady,
@@ -756,7 +772,7 @@ function LookupView({
     <section className="viewStack">
       {/* ── Unified search bar ── */}
       <div className="searchBar">
-        <span className="searchIcon">🔍</span>
+        <span className="searchIcon" aria-hidden="true">🔍</span>
         <input
           className="searchInput"
           value={drug}
@@ -765,12 +781,18 @@ function LookupView({
           placeholder="Enter drug name or brand (e.g. Metformin, Aspirin)"
           autoComplete="off"
           spellCheck="false"
+          aria-label="Drug name search"
         />
+        {response && (
+          <button className="searchClearBtn" type="button"
+            onClick={onClear} aria-label="Clear search">✕</button>
+        )}
         <button
           className="searchBtn"
           type="button"
           onClick={onLookup}
-          disabled={loading || !contextReady}
+          disabled={loading || !contextReady || !drug.trim()}
+          aria-label="Search drug database"
         >
           {loading ? "Searching…" : "Search"}
         </button>
@@ -971,7 +993,8 @@ function ChatView({
             <span className="chatHeaderLabel">Chat</span>
           </div>
           {messages.length > 0 && (
-            <button className="chatClearBtn" type="button" onClick={onClear}>
+            <button className="chatClearBtn" type="button" onClick={onClear}
+              aria-label="Clear conversation">
               Clear chat
             </button>
           )}
@@ -1038,7 +1061,8 @@ function ChatView({
               className="primaryButton chatSendBtn"
               type="button"
               onClick={onSend}
-              disabled={loading || !contextReady}
+              disabled={loading || !contextReady || !chatInput.trim()}
+              aria-label="Send message"
             >
               {loading ? "…" : "Send"}
             </button>
@@ -1090,6 +1114,7 @@ function PrescriptionView({
             type="file"
             accept="image/*"
             onChange={onFileChange}
+            aria-label="Upload prescription image"
           />
           <button
             className="primaryButton"
@@ -1208,6 +1233,7 @@ function PrescriptionView({
                       className="secondaryButton detectedChatBtn"
                       type="button"
                       onClick={() => onSendToChat(medicine)}
+                      aria-label={`Chat about ${medicine.drug || medicine.normalized || medicine.query}`}
                     >
                       Chat
                     </button>
@@ -1250,19 +1276,20 @@ function ContextHighlights({ data }) {
 }
 
 function MatchedDrugStrip({ items }) {
+  const valid = items
+    .filter((item) => item.best_match && Number(item.confidence || 0) > 0)
+    .slice(0, 3);
+  if (!valid.length) return null;
   return (
-    <div className="drugStrip">
-      {items
-        .filter((item) => item.best_match)
-        .slice(0, 3)
-        .map((item) => (
-          <span key={`${item.query}-${item.normalized}`}>
-            {item.best_match?.generic_name_clean ||
-              item.best_match?.generic_name ||
-              item.query}{" "}
-            - {Math.round(Number(item.confidence || 0) * 100)}%
-          </span>
-        ))}
+    <div className="drugStrip" aria-label="Matched drugs">
+      {valid.map((item) => (
+        <span key={`${item.query}-${item.normalized}`}>
+          {item.best_match?.generic_name_clean ||
+            item.best_match?.generic_name ||
+            item.query}{" "}
+          — {Math.round(Number(item.confidence) * 100)}%
+        </span>
+      ))}
     </div>
   );
 }
@@ -1280,9 +1307,10 @@ function AccordionRow({ title, open, onToggle, preview, full }) {
   const hasContent = Boolean(full && full.trim());
   return (
     <div className="accordionRow">
-      <button type="button" onClick={onToggle} disabled={!hasContent}>
+      <button type="button" onClick={onToggle} disabled={!hasContent}
+        aria-expanded={open} aria-label={`${title} — ${open ? "collapse" : "expand"}`}>
         <span>{title}</span>
-        <span>{open ? "Hide" : "Show"}</span>
+        <span>{open ? "▲" : "▼"}</span>
       </button>
       <div className={open ? "accordionBody open" : "accordionBody"}>
         {hasContent ? (open ? full : preview) : "-"}

@@ -998,6 +998,24 @@ textarea:focus {
 .searchBtn:hover { opacity: 0.88; }
 .searchBtn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.searchClearBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  margin-right: 2px;
+}
+.searchClearBtn:hover { background: var(--red-soft); color: var(--red-text); }
+
 /* Lookup empty state */
 .lookupEmptyState {
   padding: 32px 20px 28px;
