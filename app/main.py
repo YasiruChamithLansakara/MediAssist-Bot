@@ -217,7 +217,13 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("FAISS initialization failed: %s", exc)
 
-    # 3. EasyOCR model pre-load (background thread — avoids 20-30s delay on first scan)
+    # 3. Embedding model pre-load (background thread — avoids 30s delay on first FAISS search)
+    #    When FAISS loads from disk, sentence-transformers is not loaded yet.
+    #    Without warmup it fires 30+ HuggingFace HTTP checks on the first live request.
+    from app.ml.embeddings import warmup_embeddings
+    warmup_embeddings()
+
+    # 4. EasyOCR model pre-load (background thread — avoids 20-30s delay on first scan)
     warmup_easyocr()
 
     yield

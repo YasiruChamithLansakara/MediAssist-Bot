@@ -396,7 +396,7 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },
-        20000,
+        45000,  // 45 s — Groq LLM + FAISS search can take 10-15 s; first call loads embeddings
       );
       setChatMessages((items) => [
         ...items,
