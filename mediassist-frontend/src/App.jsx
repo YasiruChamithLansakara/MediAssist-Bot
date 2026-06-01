@@ -442,6 +442,16 @@ export default function App() {
     setActiveView("chat");
   };
 
+  const clearPrescription = useCallback(() => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setUploadFile(null);
+    setPreviewUrl("");
+    setOcrResult(null);
+    setOcrText("");
+    setOcrError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [previewUrl]);
+
   const onFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     setUploadFile(file);
@@ -737,6 +747,7 @@ export default function App() {
             onFileChange={onFileChange}
             onUpload={uploadPrescription}
             onAnalyzeText={analyzeOcrText}
+            onClear={clearPrescription}
             onSendToChat={sendDetectedToChat}
             onSendAllToChat={sendAllToChat}
             contextReady={contextReady}
@@ -1004,12 +1015,11 @@ function ChatView({
             <span className="chatHeaderIcon">💬</span>
             <span className="chatHeaderLabel">Chat</span>
           </div>
-          {messages.length > 0 && (
-            <button className="chatClearBtn" type="button" onClick={onClear}
-              aria-label="Clear conversation">
-              Clear chat
-            </button>
-          )}
+          <button className="chatClearBtn" type="button" onClick={onClear}
+            disabled={messages.length === 0}
+            aria-label="Clear conversation">
+            Clear chat
+          </button>
         </div>
 
         {/* ── Messages ── */}
@@ -1099,6 +1109,7 @@ function PrescriptionView({
   onFileChange,
   onUpload,
   onAnalyzeText,
+  onClear,
   onSendToChat,
   onSendAllToChat,
   contextReady,
@@ -1128,14 +1139,27 @@ function PrescriptionView({
             onChange={onFileChange}
             aria-label="Upload prescription image"
           />
-          <button
-            className="primaryButton"
-            type="button"
-            onClick={onUpload}
-            disabled={loading || !contextReady || !uploadFile}
-          >
-            {loading ? "Extracting..." : "Extract text"}
-          </button>
+          <div className="uploadActions">
+            <button
+              className="primaryButton"
+              type="button"
+              onClick={onUpload}
+              disabled={loading || !contextReady || !uploadFile}
+            >
+              {loading ? "Extracting..." : "Extract text"}
+            </button>
+            {(uploadFile || result) && (
+              <button
+                className="clearBtn"
+                type="button"
+                onClick={onClear}
+                disabled={loading}
+                aria-label="Clear prescription image and results"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {uploadFile && <div className="fileName">📄 {uploadFile.name}</div>}
           {!uploadFile && (
             <div className="emptyState">Choose a prescription image</div>

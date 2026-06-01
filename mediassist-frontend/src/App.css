@@ -1098,10 +1098,15 @@ textarea:focus {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.chatClearBtn:hover {
-  background: rgba(239, 68, 68, 0.18);
+.chatClearBtn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
   color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.chatClearBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* ── OCR confidence banner (replaces old .confidenceBar) ─────────────────── */
@@ -1373,6 +1378,34 @@ textarea:focus {
   align-self: flex-end;
   min-width: 80px;
 }
+
+/* ── Universal clear button ─────────────────────────────────────────────── */
+.clearBtn {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  background: transparent;
+  color: var(--red-text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.clearBtn:hover:not(:disabled) {
+  background: var(--red-soft);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.clearBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Upload actions row: Extract + Clear side by side */
+.uploadActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.uploadActions .primaryButton { flex: 1; }
 
 /* ── Prescription "send all" button ─────────────────────────────────────── */
 .detectedActions {
