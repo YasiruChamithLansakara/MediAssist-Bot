@@ -97,16 +97,32 @@ img {
 .topBar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
-.topBarMeta {
-  display: grid;
-  gap: 10px;
-  justify-items: end;
+.topBarBrand {}
+
+.topBar h1 {
+  margin: 4px 0 0;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  letter-spacing: -0.04em;
+  line-height: 1.1;
 }
+
+/* Status dot (replaces the verbose badge) */
+.backendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.backendDot.online  { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
+.backendDot.offline { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.2); }
+.backendDot.checking{ background: #94a3b8; }
 
 .eyebrow {
   font-size: 12px;
@@ -116,57 +132,46 @@ img {
   color: var(--accent);
 }
 
-.topBar h1 {
-  margin: 6px 0 0;
-  font-size: clamp(2rem, 4vw, 3.5rem);
-  line-height: 1;
-  letter-spacing: -0.05em;
-}
+/* .topBar h1 moved to new .topBar block above */
 
-.apiBadge {
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
-  word-break: break-all;
-}
+/* Legacy badge styles removed — replaced by .backendDot */
 
-.backendBadge {
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.backendBadge.checking {
-  background: #eef4fb;
-  color: var(--blue-text);
-}
-
-.backendBadge.online {
-  background: var(--green-soft);
-  color: var(--green-text);
-  border-color: rgba(22, 101, 52, 0.18);
-}
-
-.backendBadge.offline {
-  background: var(--red-soft);
-  color: var(--red-text);
-  border-color: rgba(153, 27, 27, 0.18);
-}
-
+/* ── Context panel ── */
 .contextPanel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: linear-gradient(180deg, #fff 0%, #f9fbfd 100%);
+  grid-template-columns: 1fr 120px auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f6f9fd 100%);
+  margin-bottom: 2px;
+}
+
+.contextField {
+  display: grid;
+  gap: 6px;
+}
+
+.contextBadge {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.contextBadge.ready {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.contextBadge.needs {
+  background: #eef4ff;
+  color: var(--blue-text);
+  font-size: 12px;
 }
 
 label {
@@ -217,37 +222,77 @@ textarea:focus {
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
-.contextState {
-  grid-column: 1 / -1;
-  padding: 12px 14px;
-  border-radius: 14px;
-  font-size: 14px;
-  font-weight: 700;
-}
+/* .contextState replaced by .contextBadge */
 
-.contextState.ready {
-  background: var(--green-soft);
-  color: var(--green-text);
-}
-
-.contextState.needs {
-  background: #eef4ff;
-  color: var(--blue-text);
-}
-
+/* ── System panel (collapsible) ── */
 .systemPanel {
+  margin-top: 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 18px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.systemPanelToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.systemPanelToggle:hover { background: var(--surface-soft); }
+
+.systemPanelToggleLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.systemPanelTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.statusMiniRow {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.miniPill {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.miniPill.online  { background: var(--green-soft);  color: var(--green-text); }
+.miniPill.offline { background: var(--red-soft);    color: var(--red-text);   }
+.miniPill.checking{ background: #eef4fb;            color: var(--blue-text);  }
+
+.systemPanelChevron {
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.systemPanelBody {
+  padding: 0 16px 16px;
   display: grid;
   gap: 14px;
-  margin-top: 16px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96) 0%,
-    rgba(248, 250, 252, 0.96) 100%
-  );
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
 }
 
 .statusGrid {
@@ -371,8 +416,12 @@ textarea:focus {
 .tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 18px 0;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 5px;
+  background: var(--surface-soft);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
 }
 
 .tab,
@@ -387,17 +436,33 @@ textarea:focus {
 }
 
 .tab {
-  min-height: 46px;
-  border-radius: 999px;
-  background: #eef4fb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border-radius: 12px;
+  background: transparent;
   color: var(--muted);
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+
+.tab:hover:not(.active) {
+  background: rgba(255,255,255,0.7);
+  color: var(--text);
 }
 
 .tab.active {
   background: var(--primary);
   color: var(--primaryText);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18);
+}
+
+.tabIcon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .viewStack {
@@ -692,37 +757,54 @@ textarea:focus {
 }
 
 .chatPanel {
-  padding: 16px;
-  display: grid;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 560px;
+  padding: 0;
+  overflow: hidden;
 }
 
 .chatMessages {
-  display: grid;
-  gap: 12px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
 }
 
 .message {
-  padding: 14px;
-  border-radius: 16px;
+  padding: 12px 16px;
+  border-radius: 18px;
   border: 1px solid var(--border);
   background: var(--surface-soft);
+  max-width: 82%;
+  align-self: flex-start;
+  word-break: break-word;
 }
 
 .message.user {
-  justify-self: end;
+  align-self: flex-end;
+  max-width: 72%;
   background: var(--primary);
   color: var(--primaryText);
   border-color: transparent;
+  border-radius: 18px 18px 4px 18px;
 }
 
 .message.assistant {
-  justify-self: start;
+  align-self: flex-start;
+  border-radius: 18px 18px 18px 4px;
+  background: #ffffff;
+  border-color: var(--border);
 }
 
 .message.loading {
-  color: var(--muted);
-  font-weight: 700;
+  background: transparent;
+  border: none;
+  padding: 8px 16px;
 }
 
 .message pre {
@@ -1133,8 +1215,11 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 10px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface-soft);
+  border-radius: 20px 20px 0 0;
 }
 
 .chatClearBtn {
@@ -1144,8 +1229,14 @@ textarea:focus {
 }
 
 .chatEmptyState {
-  padding: 32px 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  padding: 32px 16px;
+  gap: 6px;
 }
 
 .chatEmptyTitle {
@@ -1192,7 +1283,12 @@ textarea:focus {
 .chatComposer {
   display: flex !important;
   flex-direction: column !important;
-  gap: 10px !important;
+  gap: 8px !important;
+  flex-shrink: 0;
+  padding: 12px 16px !important;
+  border-top: 1px solid var(--border);
+  background: var(--surface-soft);
+  border-radius: 0 0 20px 20px;
 }
 
 .chatDrugInput {
@@ -1254,80 +1350,31 @@ textarea:focus {
 }
 
 @media (max-width: 900px) {
-  .workspace {
-    padding: 18px;
-  }
-
-  .contextPanel,
+  .workspace { padding: 18px; }
+  .contextPanel { grid-template-columns: 1fr 90px auto; }
   .statusGrid,
   .infoGrid,
   .uploadGrid,
-  .chatComposer,
   .toolRow,
-  .ocrEditor {
-    grid-template-columns: 1fr;
-  }
-
-  .statusGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .topBar,
-  .resultTop,
-  .actionsRow,
-  .sectionHead {
-    align-items: flex-start;
-  }
+  .ocrEditor { grid-template-columns: 1fr; }
+  .statusGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chatPanel { height: 500px; }
+  .resultTop, .actionsRow, .sectionHead { align-items: flex-start; }
 }
 
 @media (max-width: 640px) {
-  .appShell {
-    padding: 12px;
-  }
-
-  .topBar {
-    flex-direction: column;
-  }
-
-  .topBarMeta {
-    width: 100%;
-    justify-items: start;
-  }
-
-  .workspace {
-    padding: 14px;
-    border-radius: 22px;
-  }
-
-  .tabs {
-    grid-template-columns: 1fr;
-  }
-
-  .statusGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .toolRow,
-  .chatComposer,
-  .uploadGrid,
-  .contextPanel,
-  .statusGrid,
-  .infoGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .primaryButton,
-  .secondaryButton,
-  .ghostButton,
-  .tab {
-    width: 100%;
-  }
-
-  .resultTop,
-  .sectionHead,
-  .actionsRow,
-  .sideEffectRow,
-  .detectedItem {
+  .appShell { padding: 10px; }
+  .workspace { padding: 14px; border-radius: 22px; }
+  .topBar { flex-direction: row; align-items: center; }
+  .contextPanel { grid-template-columns: 1fr; }
+  .contextBadge { display: none; }  /* hide on mobile — context shown inline */
+  .tabs { grid-template-columns: repeat(3, 1fr); }
+  .tabIcon { display: none; }       /* icon-less tabs on very small screens */
+  .statusGrid { grid-template-columns: 1fr; }
+  .chatPanel { height: 460px; }
+  .message.user, .message.assistant { max-width: 90%; }
+  .primaryButton, .secondaryButton, .ghostButton { width: 100%; }
+  .resultTop, .sectionHead, .actionsRow, .sideEffectRow, .detectedItem {
     flex-direction: column;
     align-items: flex-start;
   }

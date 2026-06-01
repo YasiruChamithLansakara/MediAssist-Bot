@@ -20,22 +20,24 @@ function MessageContent({ text }) {
   const lines = (text || "").split("\n");
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^---+$/.test(line.trim())) {
+    const trimmed = lines[i].trimStart();
+    if (/^---+$/.test(trimmed)) {
       out.push(<hr key={i} className="msgDivider" />);
-    } else if (/^#{1,3}\s/.test(line)) {
-      out.push(<p key={i} className="msgHeading">{renderInline(line.replace(/^#{1,3}\s/, ""))}</p>);
-    } else if (/^[•\-\*]\s/.test(line)) {
+    } else if (/^#{1,3}\s/.test(trimmed)) {
+      out.push(<p key={i} className="msgHeading">{renderInline(trimmed.replace(/^#{1,3}\s/, ""))}</p>);
+    } else if (/^[•\-\*]\s?/.test(trimmed) && trimmed.length > 1) {
+      // Match: •text, - text, * text (with or without space after bullet)
+      const content = trimmed.replace(/^[•\-\*]\s*/, "");
       out.push(
         <div key={i} className="msgBullet">
           <span className="msgBulletDot">•</span>
-          <span>{renderInline(line.replace(/^[•\-\*]\s/, ""))}</span>
+          <span>{renderInline(content)}</span>
         </div>
       );
-    } else if (line.trim() === "") {
+    } else if (trimmed === "") {
       out.push(<div key={i} className="msgBlank" />);
     } else {
-      out.push(<p key={i} className="msgLine">{renderInline(line)}</p>);
+      out.push(<p key={i} className="msgLine">{renderInline(trimmed)}</p>);
     }
   }
   return <div className="msgContent">{out}</div>;
@@ -170,6 +172,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+
+  const [systemPanelOpen, setSystemPanelOpen] = useState(false);
 
   const [uploadFile, setUploadFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -542,135 +546,109 @@ export default function App() {
   return (
     <main className="appShell">
       <section className="workspace">
+        {/* ── App header ── */}
         <header className="topBar">
-          <div>
+          <div className="topBarBrand">
             <div className="eyebrow">MediAssist Bot</div>
             <h1>Medication assistant</h1>
           </div>
-          <div className="topBarMeta">
-            <div className={`backendBadge ${backendStatus}`}>
-              {backendStatus === "online"
-                ? "Backend online"
-                : backendStatus === "offline"
-                  ? "Backend offline"
-                  : "Checking backend"}
-            </div>
-            <div className="apiBadge">{API_BASE}</div>
-          </div>
+          <div className={`backendDot ${backendStatus}`} title={backendStatus === "online" ? "Backend online" : "Backend offline"} />
         </header>
 
+        {/* ── Patient context (3-column compact) ── */}
         <section className="contextPanel" aria-label="Patient context">
-          <label>
-            <span>Disease</span>
-            <select
-              value={disease}
-              onChange={(event) =>
-                setDisease(normalizeDisease(event.target.value))
-              }
-            >
-              <option value="">Select disease</option>
-              {DISEASE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
+          <label className="contextField">
+            <span>Condition</span>
+            <select value={disease} onChange={(e) => setDisease(normalizeDisease(e.target.value))}>
+              <option value="">Select…</option>
+              {DISEASE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </label>
-          <label>
+          <label className="contextField">
             <span>Age</span>
-            <input
-              type="number"
-              min="1"
-              max="120"
-              inputMode="numeric"
-              value={age}
-              onChange={(event) => setAge(event.target.value)}
-              placeholder="1-120"
-            />
+            <input type="number" min="1" max="120" inputMode="numeric" value={age}
+              onChange={(e) => setAge(e.target.value)} placeholder="1–120" />
           </label>
-          <div className={`contextState ${contextReady ? "ready" : "needs"}`}>
-            {contextReady ? "Context ready" : contextMessage}
+          <div className={`contextBadge ${contextReady ? "ready" : "needs"}`}>
+            {contextReady ? "✓ Ready" : contextMessage}
           </div>
         </section>
 
+        {/* ── System status (collapsible) ── */}
         <section className="systemPanel" aria-label="System status">
-          <div className="sectionHead">
-            <div>
-              <h2>System status</h2>
-              <p className="muted">Live backend and feature availability.</p>
-            </div>
-            <span className="smallCaps">Runtime</span>
-          </div>
-          <div className="statusGrid">
-            {featureStatus.map((item) => (
-              <div key={item.label} className="statusCard">
-                <div className="statusCardTop">
-                  <strong>{item.label}</strong>
-                  <span className={`statusPill ${item.tone}`}>{item.tone}</span>
-                </div>
-                <p>{item.detail}</p>
+          <button className="systemPanelToggle" type="button"
+            onClick={() => setSystemPanelOpen((v) => !v)}>
+            <div className="systemPanelToggleLeft">
+              <span className={`backendDot ${backendStatus}`} />
+              <span className="systemPanelTitle">System status</span>
+              <div className="statusMiniRow">
+                {featureStatus.slice(0, 4).map((s) => (
+                  <span key={s.label} className={`miniPill ${s.tone}`}>{s.label}</span>
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div className="statusDivider" />
-
-          <div className="activityWrap">
-            <div className="sectionHead compact">
-              <div>
-                <h3>Recent activity</h3>
-                <p className="muted">
-                  Last backend actions recorded by the API.
-                </p>
-              </div>
-              <span className="smallCaps">{recentActivity.length} events</span>
             </div>
+            <span className="systemPanelChevron">{systemPanelOpen ? "▲" : "▼"}</span>
+          </button>
 
-            {recentActivity.length ? (
-              <div className="activityList">
-                {recentActivity.slice(0, 4).map((event, index) => (
-                  <div
-                    key={`${event.timestamp}-${index}`}
-                    className="activityItem"
-                  >
-                    <div className="activityItemTop">
-                      <strong>{event.kind}</strong>
-                      <span
-                        className={`statusPill ${event.success ? "online" : "offline"}`}
-                      >
-                        {event.success ? "success" : "error"}
-                      </span>
+          {systemPanelOpen && (
+            <div className="systemPanelBody">
+              <div className="statusGrid">
+                {featureStatus.map((item) => (
+                  <div key={item.label} className="statusCard">
+                    <div className="statusCardTop">
+                      <strong>{item.label}</strong>
+                      <span className={`statusPill ${item.tone}`}>{item.tone}</span>
                     </div>
-                    <p>{event.detail || "Recorded event"}</p>
-                    <div className="activityMeta">
-                      <span>{event.timestamp}</span>
-                      <span>{event.status_code || "-"}</span>
-                    </div>
+                    <p>{item.detail}</p>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="emptyState">
-                No activity recorded yet. Use lookup, chat, or OCR to populate
-                this panel.
+
+              <div className="statusDivider" />
+
+              <div className="activityWrap">
+                <div className="sectionHead compact">
+                  <h3>Recent activity</h3>
+                  <span className="smallCaps">{recentActivity.length} events</span>
+                </div>
+                {recentActivity.length ? (
+                  <div className="activityList">
+                    {recentActivity.slice(0, 4).map((event, index) => (
+                      <div key={`${event.timestamp}-${index}`} className="activityItem">
+                        <div className="activityItemTop">
+                          <strong>{event.kind}</strong>
+                          <span className={`statusPill ${event.success ? "online" : "offline"}`}>
+                            {event.success ? "ok" : "err"}
+                          </span>
+                        </div>
+                        <p>{event.detail || "Recorded event"}</p>
+                        <div className="activityMeta">
+                          <span>{event.timestamp}</span>
+                          <span>{event.status_code || "-"}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted" style={{padding:"8px 0"}}>No activity yet.</p>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
 
+        {/* ── Tabs ── */}
         <nav className="tabs" aria-label="MediAssist views">
           {[
-            ["lookup", "Lookup"],
-            ["chat", "Chat"],
-            ["prescription", "Prescription"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
+            ["lookup", "🔍", "Lookup"],
+            ["chat",   "💬", "Chat"],
+            ["prescription", "📋", "Prescription"],
+          ].map(([id, icon, label]) => (
+            <button key={id} type="button"
               className={activeView === id ? "tab active" : "tab"}
-              onClick={() => setActiveView(id)}
-            >
-              {label}
+              onClick={() => setActiveView(id)}>
+              <span className="tabIcon">{icon}</span>
+              <span>{label}</span>
             </button>
           ))}
         </nav>
@@ -733,29 +711,8 @@ export default function App() {
           />
         )}
 
-        {anyLoading && (
-          <div className="loadingContainer">
-            <div className="spinner"></div>
-            <div className="loadingText">Searching drug database...</div>
-          </div>
-        )}
-
-        {lookupResponse?.query && !anyLoading && (
-          <div className="apiLine">
-            <span className="muted">API:</span>{" "}
-            <a
-              href={`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {`${API_BASE}/lookup?drug=${encodeURIComponent(lookupResponse.query)}`}
-            </a>
-          </div>
-        )}
-
         <footer className="footer">
-          Educational demo only. Confirm medication decisions with a licensed
-          clinician.
+          Educational demo only · Confirm all medication decisions with a licensed clinician
         </footer>
       </section>
     </main>
