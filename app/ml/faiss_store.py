@@ -116,26 +116,42 @@ class FAISSStore:
         if k == 0:
             return []
 
+        # Hold the lock across both the FAISS search AND the metadata reads.
+        # A concurrent build() replaces _index and _metadata atomically under
+        # this same lock; releasing it between the two accesses would allow
+        # _metadata to be swapped, making FAISS-returned indices stale.
         with self._lock:
             scores, indices = self._index.search(q_vec, k)
-
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(self._metadata):
-                continue
-            meta = self._metadata[idx]
-            results.append({
-                "drug_id":     meta.get("drug_id", ""),
-                "drug_name":   meta.get("drug_name", ""),
-                "generic_name": meta.get("generic_name", ""),
-                "similarity":  round(float(score), 4),
-                "metadata":    meta,
-            })
+            results = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < 0 or idx >= len(self._metadata):
+                    continue
+                meta = self._metadata[idx]
+                results.append({
+                    "drug_id":     meta.get("drug_id", ""),
+                    "drug_name":   meta.get("drug_name", ""),
+                    "generic_name": meta.get("generic_name", ""),
+                    "similarity":  round(float(score), 4),
+                    "metadata":    meta,
+                })
 
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results
 
     # ── persist ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _current_csv_path() -> str:
+        """Return the canonical absolute path of the active drug CSV."""
+        return str(
+            os.path.abspath(
+                os.getenv(
+                    "DRUG_DATASET_PATH",
+                    str(Path(__file__).resolve().parents[2]
+                        / "data" / "processed" / "drug_knowledge_bot_ready_clean.csv")
+                )
+            )
+        )
 
     def save(self) -> bool:
         if not self._ready or self._index is None:
@@ -145,7 +161,11 @@ class FAISSStore:
             os.makedirs(self.index_path, exist_ok=True)
             faiss.write_index(self._index, os.path.join(self.index_path, "index.faiss"))
             with open(os.path.join(self.index_path, "metadata.json"), "w") as f:
-                json.dump({"dim": self._dim, "metadata": self._metadata}, f)
+                json.dump({
+                    "dim":      self._dim,
+                    "metadata": self._metadata,
+                    "source_csv": self._current_csv_path(),   # ← stamp CSV path
+                }, f)
             logger.info("FAISS index saved to %s", self.index_path)
             return True
         except Exception as exc:
@@ -158,14 +178,28 @@ class FAISSStore:
         if not os.path.exists(index_file) or not os.path.exists(meta_file):
             return False
         try:
+            with open(meta_file) as f:
+                data = json.load(f)
+
+            # Invalidate the cached index if it was built from a different CSV.
+            # This makes DRUG_DATASET_PATH changes take effect automatically.
+            stored_csv  = data.get("source_csv", "")
+            current_csv = self._current_csv_path()
+            if stored_csv and stored_csv != current_csv:
+                logger.info(
+                    "FAISS index was built from a different CSV — rebuilding.\n"
+                    "  stored : %s\n  current: %s", stored_csv, current_csv,
+                )
+                return False
+
             with self._lock:
                 self._index = faiss.read_index(index_file)
-                with open(meta_file) as f:
-                    data = json.load(f)
                 self._dim = data["dim"]
                 self._metadata = data["metadata"]
                 self._ready = True
-            logger.info("FAISS index loaded from %s (%d vectors)", self.index_path, len(self._metadata))
+            logger.info(
+                "FAISS index loaded from %s (%d vectors)", self.index_path, len(self._metadata)
+            )
             return True
         except Exception as exc:
             logger.error("FAISS load failed: %s", exc)

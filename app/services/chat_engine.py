@@ -47,6 +47,42 @@ def _unique_keep_order(items: List[str]) -> List[str]:
 
 
 # =====================================================
+# MEDICAL TOPIC GUARD
+# =====================================================
+_MEDICAL_KEYWORDS = {
+    # Drug / pharmacy terms
+    "drug", "medicine", "medication", "tablet", "pill", "capsule", "dose",
+    "dosage", "prescription", "side effect", "adverse", "warning", "interaction",
+    "contraindication", "treatment", "pharmacy", "pharmacist",
+    "mg", "ml", "mcg", "injection", "inhaler", "syrup", "ointment",
+    "cream", "drops", "antibiotic", "painkiller", "safe", "allergy", "overdose",
+    # Health / body / symptom terms (also needed for emergency pass-through)
+    "symptom", "pain", "ache", "hurt", "chest", "breathing", "blood",
+    "heart", "health", "condition", "disease", "bleed", "seizure",
+    "dizzy", "nausea", "swelling", "fever", "rash", "infection",
+}
+
+def _is_medical_question(message: str, explicit_drugs: list = None) -> bool:
+    """
+    Return True if the message is about medications or health.
+    Also returns True if the message explicitly mentions a provided drug name
+    (e.g. user typed 'aspirin' in drug field and message says 'tell me about aspirin').
+    """
+    import re
+    msg_lower = message.lower()
+    if any(kw in msg_lower for kw in _MEDICAL_KEYWORDS):
+        return True
+    # Allow if the message contains the drug name itself (word-boundary match,
+    # min 4 chars to avoid false positives from very short tokens like 'it')
+    if explicit_drugs:
+        for d in explicit_drugs:
+            if d and len(d) >= 4:
+                if re.search(r'\b' + re.escape(d.lower()) + r'\b', msg_lower):
+                    return True
+    return False
+
+
+# =====================================================
 # INTENT DETECTION
 # =====================================================
 def _intent(message: str) -> str:
@@ -111,8 +147,13 @@ def build_chat_response(
         max_entities=5,
     )
 
+    # Use the resolved drug name, NOT e["text"] which is the source segment.
+    # e["text"] can be the entire message sentence, which then gets passed
+    # to lookup_drug and fuzzy-matches nonsense like "cricket" → "Immune System Booster".
     detected_names = [
-        e.get("text", "") for e in detected_entities if e.get("text")
+        e.get("drug") or e.get("normalized") or ""
+        for e in detected_entities
+        if e.get("drug") or e.get("normalized")
     ]
 
     # -------------------------------------------------
@@ -163,6 +204,36 @@ def build_chat_response(
             record["rag_context"] = rag_context
 
         matched.append(record)
+
+    # -------------------------------------------------
+    # 4b. OFF-TOPIC GUARD (post-lookup)
+    # The MESSAGE itself must be medical — we check this regardless of whether
+    # a valid drug was supplied in the drug field. A user can type "Aspirin"
+    # as the drug and "I like to play cricket" as the message: Aspirin matches
+    # perfectly, but the question is not about medication.
+    #
+    # Allow if: message has medical/health keywords OR message explicitly
+    # mentions the drug name (e.g. "tell me about aspirin").
+    # Reject everything else with a polite redirection.
+    # -------------------------------------------------
+    if not _is_medical_question(message, explicit_drugs):
+        return {
+            "message": message,
+            "intent": "off_topic",
+            "answer": (
+                "I can only assist with medication and prescription questions. "
+                "Please ask about a specific medicine — its dosage, side effects, "
+                "warnings, or interactions — or upload a prescription to analyse."
+            ),
+            "detected_entities": detected_entities,
+            "matched_drugs": [],
+            "citations": [],
+            "context": {},
+            "is_emergency": False,
+            "safety": safety_check,
+            "safety_notice": SAFETY_NOTICE,
+            "request_id": request_id,
+        }
 
     # -------------------------------------------------
     # 5. BUILD CONTEXT
@@ -230,7 +301,7 @@ def _format_answer(message, intent, matched, context):
 
     for m in matched:
 
-        drug = m.get("best_match", {})
+        drug = m.get("best_match") or {}   # 'or {}' handles explicit None values
         name = drug.get("generic_name_clean", "Unknown")
 
         lines.append(f"Drug: {name}")
