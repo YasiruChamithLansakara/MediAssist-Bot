@@ -62,10 +62,24 @@ _MEDICAL_KEYWORDS = {
     "dizzy", "nausea", "swelling", "fever", "rash", "infection",
 }
 
-def _is_medical_question(message: str) -> bool:
-    """Return True if the message text itself is about medications or health."""
+def _is_medical_question(message: str, explicit_drugs: list = None) -> bool:
+    """
+    Return True if the message is about medications or health.
+    Also returns True if the message explicitly mentions a provided drug name
+    (e.g. user typed 'aspirin' in drug field and message says 'tell me about aspirin').
+    """
+    import re
     msg_lower = message.lower()
-    return any(kw in msg_lower for kw in _MEDICAL_KEYWORDS)
+    if any(kw in msg_lower for kw in _MEDICAL_KEYWORDS):
+        return True
+    # Allow if the message contains the drug name itself (word-boundary match,
+    # min 4 chars to avoid false positives from very short tokens like 'it')
+    if explicit_drugs:
+        for d in explicit_drugs:
+            if d and len(d) >= 4:
+                if re.search(r'\b' + re.escape(d.lower()) + r'\b', msg_lower):
+                    return True
+    return False
 
 
 # =====================================================
@@ -193,19 +207,16 @@ def build_chat_response(
 
     # -------------------------------------------------
     # 4b. OFF-TOPIC GUARD (post-lookup)
-    # Only check explicit drug matches (from the 'drugs' input parameter).
-    # NER can extract words like "cricket" from the message and fuzzy-match
-    # them to real drugs — that false positive must not bypass this guard.
-    # Rule: reject if no EXPLICIT drug matched AND the message text itself
-    # contains no medical/health keywords.
+    # The MESSAGE itself must be medical — we check this regardless of whether
+    # a valid drug was supplied in the drug field. A user can type "Aspirin"
+    # as the drug and "I like to play cricket" as the message: Aspirin matches
+    # perfectly, but the question is not about medication.
+    #
+    # Allow if: message has medical/health keywords OR message explicitly
+    # mentions the drug name (e.g. "tell me about aspirin").
+    # Reject everything else with a polite redirection.
     # -------------------------------------------------
-    explicit_drugs_set = set(e.lower() for e in explicit_drugs)
-    has_explicit_match = any(
-        m.get("best_match")
-        for m in matched
-        if (m.get("query") or "").lower() in explicit_drugs_set
-    )
-    if not has_explicit_match and not _is_medical_question(message):
+    if not _is_medical_question(message, explicit_drugs):
         return {
             "message": message,
             "intent": "off_topic",
