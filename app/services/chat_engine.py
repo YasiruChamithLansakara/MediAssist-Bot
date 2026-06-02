@@ -47,6 +47,28 @@ def _unique_keep_order(items: List[str]) -> List[str]:
 
 
 # =====================================================
+# MEDICAL TOPIC GUARD
+# =====================================================
+_MEDICAL_KEYWORDS = {
+    # Drug / pharmacy terms
+    "drug", "medicine", "medication", "tablet", "pill", "capsule", "dose",
+    "dosage", "prescription", "side effect", "adverse", "warning", "interaction",
+    "contraindication", "treatment", "pharmacy", "pharmacist",
+    "mg", "ml", "mcg", "injection", "inhaler", "syrup", "ointment",
+    "cream", "drops", "antibiotic", "painkiller", "safe", "allergy", "overdose",
+    # Health / body / symptom terms (also needed for emergency pass-through)
+    "symptom", "pain", "ache", "hurt", "chest", "breathing", "blood",
+    "heart", "health", "condition", "disease", "bleed", "seizure",
+    "dizzy", "nausea", "swelling", "fever", "rash", "infection",
+}
+
+def _is_medical_question(message: str) -> bool:
+    """Return True if the message text itself is about medications or health."""
+    msg_lower = message.lower()
+    return any(kw in msg_lower for kw in _MEDICAL_KEYWORDS)
+
+
+# =====================================================
 # INTENT DETECTION
 # =====================================================
 def _intent(message: str) -> str:
@@ -111,8 +133,13 @@ def build_chat_response(
         max_entities=5,
     )
 
+    # Use the resolved drug name, NOT e["text"] which is the source segment.
+    # e["text"] can be the entire message sentence, which then gets passed
+    # to lookup_drug and fuzzy-matches nonsense like "cricket" → "Immune System Booster".
     detected_names = [
-        e.get("text", "") for e in detected_entities if e.get("text")
+        e.get("drug") or e.get("normalized") or ""
+        for e in detected_entities
+        if e.get("drug") or e.get("normalized")
     ]
 
     # -------------------------------------------------
@@ -163,6 +190,39 @@ def build_chat_response(
             record["rag_context"] = rag_context
 
         matched.append(record)
+
+    # -------------------------------------------------
+    # 4b. OFF-TOPIC GUARD (post-lookup)
+    # Only check explicit drug matches (from the 'drugs' input parameter).
+    # NER can extract words like "cricket" from the message and fuzzy-match
+    # them to real drugs — that false positive must not bypass this guard.
+    # Rule: reject if no EXPLICIT drug matched AND the message text itself
+    # contains no medical/health keywords.
+    # -------------------------------------------------
+    explicit_drugs_set = set(e.lower() for e in explicit_drugs)
+    has_explicit_match = any(
+        m.get("best_match")
+        for m in matched
+        if (m.get("query") or "").lower() in explicit_drugs_set
+    )
+    if not has_explicit_match and not _is_medical_question(message):
+        return {
+            "message": message,
+            "intent": "off_topic",
+            "answer": (
+                "I can only assist with medication and prescription questions. "
+                "Please ask about a specific medicine — its dosage, side effects, "
+                "warnings, or interactions — or upload a prescription to analyse."
+            ),
+            "detected_entities": detected_entities,
+            "matched_drugs": [],
+            "citations": [],
+            "context": {},
+            "is_emergency": False,
+            "safety": safety_check,
+            "safety_notice": SAFETY_NOTICE,
+            "request_id": request_id,
+        }
 
     # -------------------------------------------------
     # 5. BUILD CONTEXT
