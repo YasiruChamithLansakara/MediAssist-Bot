@@ -64,7 +64,7 @@ def _color(pct: float) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def eval_dataset() -> Dict[str, Any]:
-    print("\n[1/7] Dataset quality …")
+    print("\n[1/8] Dataset quality …")
     t0 = time.time()
     try:
         import pandas as pd
@@ -138,7 +138,7 @@ LOOKUP_TEST_CASES = [
 ]
 
 def eval_drug_lookup() -> Dict[str, Any]:
-    print("\n[2/7] Drug lookup accuracy …")
+    print("\n[2/8] Drug lookup accuracy …")
     t0 = time.time()
     try:
         from app.services.drug_lookup import init_store, lookup_drug
@@ -227,7 +227,7 @@ NER_TEST_CASES = [
 ]
 
 def eval_ner() -> Dict[str, Any]:
-    print("\n[3/7] NER drug extraction …")
+    print("\n[3/8] NER drug extraction …")
     t0 = time.time()
     try:
         from app.services.ner_service import extract_medication_entities
@@ -303,7 +303,7 @@ SAFETY_TESTS = {
 }
 
 def eval_safety() -> Dict[str, Any]:
-    print("\n[4/7] Safety layer …")
+    print("\n[4/8] Safety layer …")
     t0 = time.time()
     try:
         from app.services.safety_service import detect_emergency_symptoms
@@ -341,7 +341,196 @@ def eval_safety() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. FAISS — SEMANTIC SEARCH
+# 5. OCR PIPELINE
+# ══════════════════════════════════════════════════════════════════════════════
+
+OCR_TEXT_CASES = [
+    {
+        "text":        "Metformin 500mg BD\nLisinopril 10mg OD",
+        "disease":     "diabetes",
+        "age":         55,
+        "expect_any":  ["metformin", "lisinopril"],
+        "label":       "two-drug prescription",
+    },
+    {
+        "text":        "T. Aspirin 81mg OD\nT. Atorvastatin 40mg at night",
+        "disease":     "heart disease",
+        "age":         65,
+        "expect_any":  ["aspirin", "atorvastatin"],
+        "label":       "tablet-prefix prescription",
+    },
+    {
+        "text":        "Salbutamol 2 puffs PRN\nFluticasone 250mcg BD inhaled",
+        "disease":     "asthma",
+        "age":         40,
+        "expect_any":  ["albuterol", "fluticasone", "salbutamol"],
+        "label":       "inhaler prescription",
+    },
+    {
+        "text":        "Inj. Insulin 10 units SC nocte\nT. Metformin 1000mg BD",
+        "disease":     "diabetes",
+        "age":         60,
+        "expect_any":  ["insulin", "metformin"],
+        "label":       "injection + tablet (prefix stripping)",
+    },
+    {
+        "text":        "Ibuprofen 400mg TDS after food\nParacetamol 500mg PRN",
+        "disease":     "arthritis",
+        "age":         50,
+        "expect_any":  ["ibuprofen", "acetaminophen", "paracetamol"],
+        "label":       "NSAID + analgesic",
+    },
+]
+
+_ABBREV_STRIP_CASES = [
+    ("T. Metformin 500mg BD",       "Metformin"),
+    ("Tab. Aspirin 81mg OD",        "Aspirin"),
+    ("Cap. Amlodipine 5mg OD",      "Amlodipine"),
+    ("Inj. Insulin 10 units SC",    "Insulin"),
+    ("Metformin500mg",              "Metformin"),   # OCR run-on
+]
+
+_SAFE_TOKENS = ["HbA1c", "B12", "D3", "T3"]
+
+def eval_ocr() -> Dict[str, Any]:
+    print("\n[5/8] OCR pipeline …")
+    t0 = time.time()
+    try:
+        from app.services.ocr_service import (
+            _clean_ocr_text,
+            _ocr_candidate_score,
+            analyze_prescription_text,
+            ocr_runtime_status,
+        )
+        from app.services.ner_service import _clean_prescription_text
+
+        # ── Engine status ────────────────────────────────────────────────────
+        status = ocr_runtime_status()
+        tesseract_ok = bool(status.get("tesseract_available"))
+        easyocr_ok   = bool(status.get("easyocr_available"))
+        at_least_one = bool(status.get("available"))
+
+        engines: List[str] = []
+        if tesseract_ok: engines.append("Tesseract")
+        if easyocr_ok:   engines.append("EasyOCR")
+
+        # ── Preprocessing / cleaning ─────────────────────────────────────────
+        text_cleaning_tests = [
+            ("Metformin   500mg\r\n\r\nBD",  True,  "whitespace normalised"),
+            ("  Aspirin 81mg OD  \n  ",       True,  "leading/trailing stripped"),
+        ]
+        clean_passed = sum(
+            1 for raw, _, _ in text_cleaning_tests
+            if not _clean_ocr_text(raw).startswith(" ")
+               and "  " not in _clean_ocr_text(raw)
+        )
+
+        # ── Abbreviation stripping ────────────────────────────────────────────
+        abbrev_passed = sum(
+            1 for raw, expected_frag in _ABBREV_STRIP_CASES
+            if expected_frag in _clean_prescription_text(raw)
+        )
+
+        # Safe tokens must NOT be split
+        safe_tok_passed = sum(
+            1 for tok in _SAFE_TOKENS
+            if _clean_prescription_text(tok).strip() == tok
+        )
+
+        # ── Candidate scoring ─────────────────────────────────────────────────
+        with_dose  = _ocr_candidate_score("Metformin 500mg daily",   0.9)
+        without_dose = _ocr_candidate_score("Metformin drug oral",    0.9)
+        clean_text = _ocr_candidate_score("Metformin 500mg BD",       0.85)
+        noisy_text = _ocr_candidate_score("M\\e>t@f[o]rmin 500mg BD", 0.85)
+        scoring_ok = (with_dose > without_dose) and (clean_text > noisy_text)
+
+        # ── Text analysis (drug extraction from typed/pasted prescription) ────
+        tp = fp = fn = 0
+        analysis_cases: List[Dict[str, Any]] = []
+        latencies: List[float] = []
+
+        for tc in OCR_TEXT_CASES:
+            t1 = time.time()
+            result = analyze_prescription_text(
+                text=tc["text"], disease=tc["disease"], age=tc["age"]
+            )
+            lat = round((time.time() - t1) * 1000, 1)
+            latencies.append(lat)
+
+            found = [
+                (m.get("drug") or m.get("normalized") or "").lower()
+                for m in result.get("detected_medicines", [])
+            ]
+
+            hit = any(any(exp in f for f in found) for exp in tc["expect_any"])
+
+            if hit:
+                tp += 1
+            else:
+                fn += 1
+
+            spurious = sum(
+                1 for f in found
+                if not any(exp in f for exp in tc["expect_any"])
+            )
+            fp += spurious
+
+            analysis_cases.append({
+                "label":      tc["label"],
+                "input_text": tc["text"][:60] + ("…" if len(tc["text"]) > 60 else ""),
+                "expected":   tc["expect_any"],
+                "found":      found,
+                "hit":        hit,
+                "latency_ms": lat,
+            })
+
+        total_text_cases = len(OCR_TEXT_CASES)
+        text_hit_rate = _pct(tp, total_text_cases)
+        avg_lat = round(sum(latencies) / len(latencies), 1) if latencies else 0
+
+        # ── Build summary ─────────────────────────────────────────────────────
+        preprocessing_score = _pct(
+            clean_passed + abbrev_passed + safe_tok_passed + (1 if scoring_ok else 0),
+            len(text_cleaning_tests) + len(_ABBREV_STRIP_CASES) + len(_SAFE_TOKENS) + 1,
+        )
+        overall = round((text_hit_rate + preprocessing_score) / 2, 1)
+
+        print(
+            f"    OK engines={engines or ['none']}"
+            f"  text_hit={text_hit_rate}%  preproc={preprocessing_score}%"
+            f"  avg_latency={avg_lat}ms"
+        )
+
+        return {
+            "engines_available": engines,
+            "tesseract_ok": tesseract_ok,
+            "easyocr_ok":   easyocr_ok,
+            "preprocessing": {
+                "text_cleaning_passed":    f"{clean_passed}/{len(text_cleaning_tests)}",
+                "abbreviation_stripping":  f"{abbrev_passed}/{len(_ABBREV_STRIP_CASES)}",
+                "safe_tokens_intact":      f"{safe_tok_passed}/{len(_SAFE_TOKENS)}",
+                "scoring_logic_correct":   scoring_ok,
+                "score_pct":               preprocessing_score,
+            },
+            "text_analysis": {
+                "total_cases":      total_text_cases,
+                "hits":             tp,
+                "misses":           fn,
+                "hit_rate_pct":     text_hit_rate,
+                "avg_latency_ms":   avg_lat,
+                "cases":            analysis_cases,
+            },
+            "elapsed_s":  round(time.time() - t0, 2),
+            "score_pct":  overall,
+            "status":     "PASS" if overall >= 70 and at_least_one else "WARN",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "score_pct": 0.0, "status": "FAIL",
+                "elapsed_s": round(time.time() - t0, 2)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. FAISS — SEMANTIC SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
 FAISS_TESTS = [
@@ -353,7 +542,7 @@ FAISS_TESTS = [
 ]
 
 def eval_faiss() -> Dict[str, Any]:
-    print("\n[5/7] FAISS semantic search …")
+    print("\n[6/8] FAISS semantic search …")
     t0 = time.time()
     try:
         from app.ml.faiss_store import get_faiss_store
@@ -436,7 +625,7 @@ LLM_TESTS = [
 ]
 
 def eval_llm(skip: bool = False) -> Dict[str, Any]:
-    print("\n[6/7] LLM response quality …")
+    print("\n[7/8] LLM response quality …")
     t0 = time.time()
     if skip:
         print("    -> skipped (--no-llm)")
@@ -507,7 +696,7 @@ def eval_llm(skip: bool = False) -> Dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def eval_pytest() -> Dict[str, Any]:
-    print("\n[7/7] Running pytest suite …")
+    print("\n[8/8] Running pytest suite …")
     t0 = time.time()
     try:
         result = subprocess.run(
@@ -682,7 +871,37 @@ def generate_html(report: Dict[str, Any], out_path: Path) -> None:
       </div>
       {'<table class="tbl"><thead><tr><th>Question</th><th>Context</th><th>Keywords</th><th>Disclaimer</th><th>Latency</th></tr></thead><tbody>' + ll_rows + '</tbody></table>' if ll_rows else '<p class="muted">LLM evaluation skipped — run without --no-llm to test.</p>'}"""
 
-    # ── 7. Pytest ─────────────────────────────────────────────────────────
+    # ── 5. OCR ────────────────────────────────────────────────────────────
+    oc = comps.get("ocr", {})
+    pp = oc.get("preprocessing", {})
+    ta = oc.get("text_analysis", {})
+    oc_eng = ", ".join(oc.get("engines_available", [])) or "none detected"
+    oc_case_rows = "".join(
+        f'<tr class="{"pass" if c.get("hit") else "fail"}">'
+        f'<td>{c["label"]}</td>'
+        f'<td title="{c["input_text"]}">{c["input_text"][:50]}...</td>'
+        f'<td>{", ".join(c["expected"])}</td>'
+        f'<td>{", ".join(c["found"]) or "(none)"}</td>'
+        f'<td>{c["latency_ms"]}ms</td>'
+        f'<td>{"OK" if c.get("hit") else "FAIL"}</td></tr>'
+        for c in ta.get("cases", [])
+    )
+    oc_body = f"""
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val" style="font-size:14px">{oc_eng}</div><div class="metric-lbl">Engines</div></div>
+        <div class="metric-box"><div class="metric-val">{ta.get("hit_rate_pct","—")}%</div><div class="metric-lbl">Text Hit Rate</div></div>
+        <div class="metric-box"><div class="metric-val">{pp.get("score_pct","—")}%</div><div class="metric-lbl">Preprocessing</div></div>
+        <div class="metric-box"><div class="metric-val">{ta.get("avg_latency_ms","—")}ms</div><div class="metric-lbl">Avg Latency</div></div>
+      </div>
+      <div class="metric-row" style="flex-wrap:wrap;gap:8px;font-size:13px">
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Abbreviation stripping: {pp.get("abbreviation_stripping","—")}</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Safe tokens intact: {pp.get("safe_tokens_intact","—")}</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Scoring logic: {"OK" if pp.get("scoring_logic_correct") else "FAIL"}</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Text cleaning: {pp.get("text_cleaning_passed","—")}</span>
+      </div>
+      {'<table class="tbl"><thead><tr><th>Case</th><th>Input text</th><th>Expected</th><th>Found</th><th>Latency</th><th>Result</th></tr></thead><tbody>' + oc_case_rows + '</tbody></table>' if oc_case_rows else '<p class="muted">OCR evaluation not run.</p>'}"""
+
+    # ── 8. Pytest ─────────────────────────────────────────────────────────
     py = comps.get("pytest", {})
     py_body = f"""
       <div class="metric-row">
@@ -786,9 +1005,10 @@ def generate_html(report: Dict[str, Any], out_path: Path) -> None:
   {section("2 · Drug Lookup Accuracy", "drug_lookup", lu_body)}
   {section("3 · NER Drug Extraction", "ner", ner_body)}
   {section("4 · Safety Layer", "safety", sa_body)}
-  {section("5 · FAISS Semantic Search", "faiss", fa_body)}
-  {section("6 · LLM Response Quality", "llm", ll_body)}
-  {section("7 · Automated Test Suite", "pytest", py_body)}
+  {section("5 · OCR Pipeline", "ocr", oc_body)}
+  {section("6 · FAISS Semantic Search", "faiss", fa_body)}
+  {section("7 · LLM Response Quality", "llm", ll_body)}
+  {section("8 · Automated Test Suite", "pytest", py_body)}
 </div>
 </body>
 </html>"""
@@ -849,6 +1069,12 @@ def generate_markdown(report: Dict[str, Any], out_path: Path) -> None:
         f"- Emergency recall: **{c.get('safety',{}).get('emergency_recall_pct','—')}%**",
         f"- Safe-phrase precision: **{c.get('safety',{}).get('safe_precision_pct','—')}%**",
         "",
+        f"### OCR Pipeline",
+        f"- Engines available: **{', '.join(c.get('ocr',{}).get('engines_available', [])) or 'none'}**",
+        f"- Text analysis hit rate: **{c.get('ocr',{}).get('text_analysis',{}).get('hit_rate_pct','—')}%**",
+        f"- Preprocessing score: **{c.get('ocr',{}).get('preprocessing',{}).get('score_pct','—')}%**",
+        f"- Avg latency: **{c.get('ocr',{}).get('text_analysis',{}).get('avg_latency_ms','—')} ms**",
+        "",
         f"### FAISS Semantic Search",
         f"- Vectors indexed: **{c.get('faiss',{}).get('vector_count','—')}**",
         f"- Semantic hit rate: **{c.get('faiss',{}).get('hit_rate_pct','—')}%**",
@@ -894,6 +1120,7 @@ def main():
             "drug_lookup": eval_drug_lookup(),
             "ner":        eval_ner(),
             "safety":     eval_safety(),
+            "ocr":        eval_ocr(),
             "faiss":      eval_faiss(),
             "llm":        eval_llm(skip=args.no_llm),
             "pytest":     eval_pytest(),
