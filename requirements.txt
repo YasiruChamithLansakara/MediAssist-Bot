@@ -5,25 +5,19 @@ python-multipart
 pydantic
 
 # Drug lookup and data handling
-numpy<2.0
+numpy
 pandas
 rapidfuzz
 
 # Prescription OCR
 pytesseract
 Pillow
-easyocr
+easyocr          # hybrid OCR engine (downloads ~200 MB models on first run)
+torchvision      # required by easyocr (matches torch version already installed)
 
 # Utilities
 requests
 python-dotenv
-
-# Medical NER
-scispacy
-
-# Embeddings + FAISS
-sentence-transformers
-faiss-cpu
 
 # Tests
 pytest

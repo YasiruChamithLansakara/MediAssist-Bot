@@ -105,9 +105,14 @@ class ConversationMemory:
 
             self._memory[session_id].append(turn)
 
-            # Trim if too many turns
+            # Trim if too many turns — keep turn 0 (initial context with disease/age)
+            # plus the most recent (max_turns - 1) turns so context is never lost.
             if len(self._memory[session_id]) > self._max_turns_per_session:
-                self._memory[session_id] = self._memory[session_id][-self._max_turns_per_session :]
+                keep = self._max_turns_per_session - 1
+                self._memory[session_id] = (
+                    self._memory[session_id][:1]
+                    + self._memory[session_id][-keep:]
+                )
 
             # Persist if enabled
             if self.use_persistence:
