@@ -264,13 +264,19 @@ def _entity_key(best_match: Dict[str, Any], fallback: str) -> str:
     )
 
 
+_NON_DRUG_FRAGMENTS = {
+    "formula", "relief", "management", "supplement", "booster",
+    "complex", "blend", "extract", "support", "therapy",
+}
+
+
 def extract_medication_entities(
     text: str,
     *,
     disease: str,
     age: int,
     max_entities: int = 5,
-    min_confidence: float = 0.78,
+    min_confidence: float = 0.84,
 ) -> List[Dict[str, Any]]:
     """
     OCR-path medication extraction.
@@ -318,7 +324,17 @@ def extract_medication_entities(
                 best_match.get("generic_name_clean")
                 or best_match.get("generic_name")
                 or result.get("normalized")
+                or ""
             )
+
+            # Reject very short resolved names (e.g. "ibu", "tin") and
+            # product-description phrases that aren't real drug names.
+            name_lower = name.lower()
+            if len(name_lower) < 4:
+                continue
+            if any(frag in name_lower for frag in _NON_DRUG_FRAGMENTS):
+                continue
+
             entities.append(
                 {
                     "text": segment,
