@@ -230,7 +230,7 @@ def _format_answer(message, intent, matched, context):
 
     for m in matched:
 
-        drug = m.get("best_match", {})
+        drug = m.get("best_match") or {}   # 'or {}' handles explicit None values
         name = drug.get("generic_name_clean", "Unknown")
 
         lines.append(f"Drug: {name}")
