@@ -1,0 +1,657 @@
+{
+  "generated_at": "2026-06-03 18:26:55",
+  "components": {
+    "dataset": {
+      "total_drugs": 3869,
+      "duplicate_records": 0,
+      "field_coverage_pct": {
+        "generic_name": 100.0,
+        "drug_class": 25.0,
+        "indications": 88.0,
+        "dosage_and_administration": 88.0,
+        "warnings": 49.4,
+        "contraindications": 51.4,
+        "common_side_effects": 13.1
+      },
+      "average_coverage_pct": 59.3,
+      "csv_path": "data/processed/drug_knowledge_bot_ready_clean.csv",
+      "elapsed_s": 1.54,
+      "score_pct": 59.3,
+      "status": "WARN"
+    },
+    "drug_lookup": {
+      "total": 20,
+      "passed": 20,
+      "failed": 0,
+      "accuracy_pct": 100.0,
+      "avg_latency_ms": 11.4,
+      "cases": [
+        {
+          "query": "metformin",
+          "label": "exact match",
+          "expected": "metformin",
+          "got": "metformin",
+          "latency_ms": 2.3,
+          "pass": true
+        },
+        {
+          "query": "paracetamol",
+          "label": "alias match",
+          "expected": "acetaminophen",
+          "got": "acetaminophen",
+          "latency_ms": 2.1,
+          "pass": true
+        },
+        {
+          "query": "tylenol",
+          "label": "brand alias",
+          "expected": "acetaminophen",
+          "got": "acetaminophen",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "aspirin",
+          "label": "exact match",
+          "expected": "aspirin",
+          "got": "aspirin 81 mg",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "atorvastatin",
+          "label": "exact match",
+          "expected": "atorvastatin",
+          "got": "atorvastatin calcium",
+          "latency_ms": 57.6,
+          "pass": true
+        },
+        {
+          "query": "albuterol",
+          "label": "exact match",
+          "expected": "albuterol",
+          "got": "albuterol",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "amoxicillin",
+          "label": "exact match",
+          "expected": "amoxicillin",
+          "got": "amoxicillin",
+          "latency_ms": 2.1,
+          "pass": true
+        },
+        {
+          "query": "azithromycin",
+          "label": "exact match",
+          "expected": "azithromycin",
+          "got": "azithromycin",
+          "latency_ms": 1.5,
+          "pass": true
+        },
+        {
+          "query": "furosemide",
+          "label": "exact match",
+          "expected": "furosemide",
+          "got": "furosemide",
+          "latency_ms": 1.6,
+          "pass": true
+        },
+        {
+          "query": "simvastatin",
+          "label": "exact match",
+          "expected": "simvastatin",
+          "got": "simvastatin",
+          "latency_ms": 2.8,
+          "pass": true
+        },
+        {
+          "query": "naproxen",
+          "label": "exact match",
+          "expected": "naproxen",
+          "got": "naproxen",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "omeprazole",
+          "label": "exact match",
+          "expected": "omeprazole",
+          "got": "omeprazole",
+          "latency_ms": 3.1,
+          "pass": true
+        },
+        {
+          "query": "clopidogrel",
+          "label": "exact match",
+          "expected": "clopidogrel",
+          "got": "clopidogrel",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "amlodipine",
+          "label": "exact match",
+          "expected": "amlodipine",
+          "got": "amlodipine besylate",
+          "latency_ms": 49.5,
+          "pass": true
+        },
+        {
+          "query": "metfromin",
+          "label": "typo tolerance",
+          "expected": "metformin",
+          "got": "metformin",
+          "latency_ms": 52.5,
+          "pass": true
+        },
+        {
+          "query": "paracetemol",
+          "label": "typo tolerance",
+          "expected": "acetaminophen",
+          "got": "acetaminophen",
+          "latency_ms": 2.1,
+          "pass": true
+        },
+        {
+          "query": "salbutamol",
+          "label": "synonym match",
+          "expected": "albuterol",
+          "got": "albuterol",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "Aspirin 81mg",
+          "label": "dosage strip",
+          "expected": "aspirin",
+          "got": "aspirin 81 mg",
+          "latency_ms": 0.0,
+          "pass": true
+        },
+        {
+          "query": "Metformin 500 mg",
+          "label": "dosage strip",
+          "expected": "metformin",
+          "got": "metformin",
+          "latency_ms": 1.0,
+          "pass": true
+        },
+        {
+          "query": "xyzunknowndrug123",
+          "label": "gibberish no match",
+          "expected": "(no match)",
+          "got": "(no match)",
+          "latency_ms": 44.0,
+          "pass": true
+        }
+      ],
+      "elapsed_s": 1.42,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "ner": {
+      "precision_pct": 66.7,
+      "recall_pct": 88.9,
+      "f1_pct": 76.2,
+      "true_positives": 8,
+      "false_positives": 4,
+      "false_negatives": 1,
+      "cases": [
+        {
+          "text": "Patient takes Metformin 500mg twice daily and Lisinopril 10mg once daily.\u2026",
+          "expected": [
+            "lisinopril",
+            "metformin"
+          ],
+          "extracted": [
+            "metformin"
+          ],
+          "tp": 1,
+          "fn": 1,
+          "fp": 0
+        },
+        {
+          "text": "Prescription: Aspirin 81mg OD, Atorvastatin 40mg at night.\u2026",
+          "expected": [
+            "atorvastatin",
+            "aspirin"
+          ],
+          "extracted": [
+            "aspirin 81 mg",
+            "atorvastatin calcium",
+            "doxylamine succinate"
+          ],
+          "tp": 2,
+          "fn": 0,
+          "fp": 1
+        },
+        {
+          "text": "Salbutamol inhaler 2 puffs PRN. Fluticasone 250mcg BD.\u2026",
+          "expected": [
+            "fluticasone",
+            "albuterol"
+          ],
+          "extracted": [
+            "acetaminophen guaifenesin",
+            "albuterol",
+            "fluticasone furoate",
+            "fluticasone propionate",
+            "levmetamfetamine"
+          ],
+          "tp": 2,
+          "fn": 0,
+          "fp": 2
+        },
+        {
+          "text": "T. Metformin 500mg BD. T. Amlodipine 5mg OD.\u2026",
+          "expected": [
+            "amlodipine",
+            "metformin"
+          ],
+          "extracted": [
+            "amlodipine besylate",
+            "metformin"
+          ],
+          "tp": 2,
+          "fn": 0,
+          "fp": 0
+        },
+        {
+          "text": "Patient requires ibuprofen 400mg TDS for pain management.\u2026",
+          "expected": [
+            "ibuprofen"
+          ],
+          "extracted": [
+            "ibuprofen diphenhydramine hcl",
+            "reuseable pain"
+          ],
+          "tp": 1,
+          "fn": 0,
+          "fp": 1
+        }
+      ],
+      "elapsed_s": 8.59,
+      "score_pct": 76.2,
+      "status": "PASS"
+    },
+    "safety": {
+      "emergency_recall_pct": 100.0,
+      "safe_precision_pct": 100.0,
+      "true_positives": 8,
+      "false_positives": 0,
+      "total_emergency_tests": 8,
+      "total_safe_tests": 5,
+      "elapsed_s": 0.0,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "conversation_memory": {
+      "turn_count": 2,
+      "history_sample": [
+        {
+          "timestamp": "2026-06-03T12:57:06.957177",
+          "role": "user",
+          "text": "Hello, I take metformin",
+          "data": {},
+          "context": {
+            "disease": "diabetes",
+            "age": 55
+          }
+        },
+        {
+          "timestamp": "2026-06-03T12:57:06.957177",
+          "role": "assistant",
+          "text": "Noted. How can I help?",
+          "data": {},
+          "context": {
+            "disease": "diabetes",
+            "age": 55
+          }
+        }
+      ],
+      "summary": {
+        "turn_count": 2,
+        "disease": "diabetes",
+        "age": 55,
+        "started_at": "2026-06-03T12:57:06.957177",
+        "updated_at": "2026-06-03T12:57:06.957177",
+        "duration_seconds": 0
+      },
+      "elapsed_s": 0.01,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "chat_engine": {
+      "total": 2,
+      "passed": 2,
+      "accuracy_pct": 100.0,
+      "cases": [
+        {
+          "msg": "What are the common side effects of metformin?",
+          "is_emergency": false,
+          "ok": true,
+          "excerpt": "\u26a0\ufe0f **IMPORTANT DISCLAIMER** \u26a0\ufe0f\n\n**This is NOT medical advice.** I am an educational tool only and cannot:\n\u2022 Diagnose diseases or conditions\n\u2022 Replace a doctor's or pharmacist's judgment\n\u2022 Recommend wh"
+        },
+        {
+          "msg": "I have severe chest pain and cant breathe",
+          "is_emergency": true,
+          "ok": true,
+          "excerpt": "\ud83d\udea8 **EMERGENCY ALERT** \ud83d\udea8\n\nYou described urgent symptoms that require **immediate medical attention**:\n\u2022 **Chest pain/pressure** \u2014 This is a sign of serious cardiac emergency. Call 911/emergency.\n\n**DO "
+        }
+      ],
+      "elapsed_s": 1.55,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "rag": {
+      "status_detail": {
+        "rag_enabled": false,
+        "provider": null,
+        "dimension": null,
+        "vector_count": 0,
+        "db_path": null,
+        "note": "SQLite RAG removed; semantic search is FAISS-only."
+      },
+      "available": false,
+      "elapsed_s": 0.0,
+      "score_pct": 0.0,
+      "status": "SKIP"
+    },
+    "activity_metrics": {
+      "snapshot": {
+        "counts": {
+          "lookup": 1,
+          "chat": 1,
+          "ocr": 1,
+          "ocr_tesseract": 1,
+          "ocr_easyocr": 0,
+          "ocr_other": 0,
+          "ocr_text": 0,
+          "errors": 1,
+          "successes": 2
+        },
+        "recent_events": [
+          {
+            "timestamp": "2026-06-03T12:57:08.511979",
+            "kind": "ocr",
+            "success": false,
+            "status_code": 500,
+            "detail": "ocr fail",
+            "context": {
+              "engine": "tesseract"
+            }
+          },
+          {
+            "timestamp": "2026-06-03T12:57:08.511979",
+            "kind": "chat",
+            "success": true,
+            "status_code": 200,
+            "detail": "chat ok",
+            "context": {}
+          },
+          {
+            "timestamp": "2026-06-03T12:57:08.511979",
+            "kind": "lookup",
+            "success": true,
+            "status_code": 200,
+            "detail": "lookup ok",
+            "context": {}
+          }
+        ]
+      },
+      "counts": {
+        "lookup": 1,
+        "chat": 1,
+        "ocr": 1,
+        "ocr_tesseract": 1,
+        "ocr_easyocr": 0,
+        "ocr_other": 0,
+        "ocr_text": 0,
+        "errors": 1,
+        "successes": 2
+      },
+      "elapsed_s": 0.0,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "ocr": {
+      "engines_available": [],
+      "tesseract_ok": false,
+      "easyocr_ok": false,
+      "preprocessing": {
+        "text_cleaning_passed": "2/2",
+        "abbreviation_stripping": "5/5",
+        "safe_tokens_intact": "4/4",
+        "scoring_logic_correct": true,
+        "score_pct": 100.0
+      },
+      "text_analysis": {
+        "total_cases": 5,
+        "hits": 5,
+        "misses": 0,
+        "hit_rate_pct": 100.0,
+        "avg_latency_ms": 222.4,
+        "cases": [
+          {
+            "label": "two-drug prescription",
+            "input_text": "Metformin 500mg BD\nLisinopril 10mg OD",
+            "expected": [
+              "metformin",
+              "lisinopril"
+            ],
+            "found": [
+              "metformin"
+            ],
+            "hit": true,
+            "latency_ms": 124.2
+          },
+          {
+            "label": "tablet-prefix prescription",
+            "input_text": "T. Aspirin 81mg OD\nT. Atorvastatin 40mg at night",
+            "expected": [
+              "aspirin",
+              "atorvastatin"
+            ],
+            "found": [
+              "aspirin 81 mg",
+              "atorvastatin calcium",
+              "doxylamine succinate"
+            ],
+            "hit": true,
+            "latency_ms": 380.2
+          },
+          {
+            "label": "inhaler prescription",
+            "input_text": "Salbutamol 2 puffs PRN\nFluticasone 250mcg BD inhaled",
+            "expected": [
+              "albuterol",
+              "fluticasone",
+              "salbutamol"
+            ],
+            "found": [
+              "albuterol",
+              "fluticasone propionate"
+            ],
+            "hit": true,
+            "latency_ms": 363.5
+          },
+          {
+            "label": "injection + tablet (prefix stripping)",
+            "input_text": "Inj. Insulin 10 units SC nocte\nT. Metformin 1000mg BD",
+            "expected": [
+              "insulin",
+              "metformin"
+            ],
+            "found": [
+              "metformin",
+              "human insulin"
+            ],
+            "hit": true,
+            "latency_ms": 129.8
+          },
+          {
+            "label": "NSAID + analgesic",
+            "input_text": "Ibuprofen 400mg TDS after food\nParacetamol 500mg PRN",
+            "expected": [
+              "ibuprofen",
+              "acetaminophen",
+              "paracetamol"
+            ],
+            "found": [
+              "acetaminophen",
+              "ibuprofen diphenhydramine hcl"
+            ],
+            "hit": true,
+            "latency_ms": 114.2
+          }
+        ]
+      },
+      "elapsed_s": 4.75,
+      "score_pct": 100.0,
+      "status": "WARN"
+    },
+    "faiss": {
+      "vector_count": 3869,
+      "dimension": 384,
+      "hit_rate_pct": 60.0,
+      "avg_latency_ms": 26.0,
+      "cases": [
+        {
+          "query": "diabetes medication blood sugar",
+          "expected_any": [
+            "metformin",
+            "insulin",
+            "glipizide"
+          ],
+          "top5_results": [
+            "glyburide",
+            "rezvoglar kwikpen",
+            "glipizide er",
+            "glimepiride",
+            "afrezza"
+          ],
+          "hit": true,
+          "latency_ms": 28.0,
+          "top_score": 0.57
+        },
+        {
+          "query": "blood pressure hypertension",
+          "expected_any": [
+            "lisinopril",
+            "amlodipine",
+            "losartan"
+          ],
+          "top5_results": [
+            "midodrine hydrochloride",
+            "phenylephrine hci",
+            "nipride rtu",
+            "acebutolol hydrochloride",
+            "levophed"
+          ],
+          "hit": false,
+          "latency_ms": 27.3,
+          "top_score": 0.439
+        },
+        {
+          "query": "asthma inhaler breathing",
+          "expected_any": [
+            "albuterol",
+            "fluticasone",
+            "salbutamol"
+          ],
+          "top5_results": [
+            "air",
+            "ammonia",
+            "primatene mist",
+            "bardown smelling salts",
+            "24 hour allergy nasal"
+          ],
+          "hit": false,
+          "latency_ms": 24.5,
+          "top_score": 0.618
+        },
+        {
+          "query": "pain relief anti-inflammatory",
+          "expected_any": [
+            "ibuprofen",
+            "aspirin",
+            "naproxen"
+          ],
+          "top5_results": [
+            "cvs arthritis pain relief",
+            "pain relief",
+            "pain relief",
+            "ibuprofen famotidine",
+            "sync ice"
+          ],
+          "hit": true,
+          "latency_ms": 25.4,
+          "top_score": 0.649
+        },
+        {
+          "query": "cholesterol statin heart disease",
+          "expected_any": [
+            "atorvastatin",
+            "simvastatin",
+            "rosuvastatin"
+          ],
+          "top5_results": [
+            "fluvastatin",
+            "atorvastatin calcium",
+            "atorvastatin calcium",
+            "lovastatin",
+            "fluvastatin sodium er"
+          ],
+          "hit": true,
+          "latency_ms": 25.0,
+          "top_score": 0.497
+        }
+      ],
+      "elapsed_s": 14.59,
+      "score_pct": 60.0,
+      "status": "PASS"
+    },
+    "llm": {
+      "keyword_score_pct": 100.0,
+      "disclaimer_rate_pct": 100.0,
+      "overall_score_pct": 100.0,
+      "cases": [
+        {
+          "question": "What are the common side effects of metformin?",
+          "disease": "diabetes",
+          "age": 55,
+          "latency_ms": 1083,
+          "checks_passed": "4/4",
+          "missing_checks": [],
+          "has_disclaimer": true,
+          "answer_excerpt": "**Metformin** \u2022 What it's for: Helps control blood sugar levels in people with type 2 diabetes. \u2022 Key warning(s): None mentioned in the provided data, but it's essential to note that metformin can cause a rare but serious condition called lactic acidosis, especially in people with kidney problems. I"
+        },
+        {
+          "question": "Is lisinopril safe for elderly patients?",
+          "disease": "hypertension",
+          "age": 72,
+          "latency_ms": 1150,
+          "checks_passed": "4/4",
+          "missing_checks": [],
+          "has_disclaimer": true,
+          "answer_excerpt": "**Lisinopril** \u2022 What it's for: Helps lower blood pressure in patients with hypertension. \u2022 Key warning(s): If you have kidney problems or a history of kidney disease, your doctor may need to adjust your dose. \u2022 Common side effects: Dizziness, lightheadedness, and fatigue are common in elderly patie"
+        }
+      ],
+      "elapsed_s": 2.24,
+      "score_pct": 100.0,
+      "status": "PASS"
+    },
+    "pytest": {
+      "total": 97,
+      "passed": 97,
+      "failed": 0,
+      "score_pct": 100.0,
+      "raw_output": "........................................................................ [ 74%]\n.........................                                                [100%]\n97 passed in 39.73s",
+      "elapsed_s": 43.3,
+      "status": "PASS"
+    }
+  },
+  "total_elapsed_s": 78.0
+}

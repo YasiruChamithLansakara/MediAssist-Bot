@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediAssist Bot — Evaluation Report</title>
+<style>
+  :root{
+    --bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;
+    --border:#e2e8f0;--accent:#2563eb;--radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);padding:32px}
+  .page-header{max-width:1100px;margin:0 auto 28px;display:flex;justify-content:space-between;align-items:flex-end}
+  .page-title{font-size:28px;font-weight:800;letter-spacing:-.03em}
+  .page-sub{color:var(--muted);font-size:14px;margin-top:4px}
+  .overall-badge{background:var(--accent);color:#fff;border-radius:12px;padding:14px 24px;text-align:center}
+  .overall-score{font-size:36px;font-weight:900;line-height:1}
+  .overall-label{font-size:12px;opacity:.8;letter-spacing:.06em;text-transform:uppercase}
+  .grid{max-width:1100px;margin:0 auto;display:grid;gap:20px}
+  .card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+  .card-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);background:#f8fafc}
+  .card-title{font-size:16px;font-weight:800}
+  .card-elapsed{color:var(--muted);font-size:12px;margin-left:8px}
+  .card-body{padding:18px 20px}
+  .score-ring{
+    width:52px;height:52px;border-radius:50%;
+    background:conic-gradient(var(--clr,#22c55e) calc(var(--pct,0)*1%),#e2e8f0 0);
+    display:flex;align-items:center;justify-content:center;position:relative
+  }
+  .score-ring::before{content:'';position:absolute;inset:6px;border-radius:50%;background:#fff}
+  .score-ring span{position:relative;font-weight:800;font-size:12px;z-index:1}
+  .metric-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .metric-box{flex:1;min-width:100px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px 16px;text-align:center}
+  .metric-val{font-size:22px;font-weight:800;color:var(--accent)}
+  .metric-lbl{font-size:12px;color:var(--muted);margin-top:2px}
+  .tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .tbl th{background:#f1f5f9;text-align:left;padding:8px 12px;font-weight:700;border-bottom:2px solid var(--border)}
+  .tbl td{padding:7px 12px;border-bottom:1px solid var(--border)}
+  .tbl tr.pass td{background:#f0fdf4}
+  .tbl tr.fail td{background:#fef2f2}
+  .bar-track{background:#e2e8f0;border-radius:999px;height:8px;width:140px}
+  .bar-fill{height:8px;border-radius:999px}
+  .muted{color:var(--muted);font-size:14px}
+  .code-block{background:#0f172a;color:#e2e8f0;border-radius:12px;padding:14px;font-size:12px;
+    overflow:auto;max-height:200px;white-space:pre-wrap;word-break:break-all}
+  summary-table table{width:100%}
+</style>
+</head>
+<body>
+<div class="page-header">
+  <div>
+    <div class="page-title">MediAssist Bot — Evaluation Report</div>
+    <div class="page-sub">Generated 2026-06-03 18:26:55 · Llama 3.1 8B via Groq · 6 diseases · FAISS + SciSpaCy</div>
+  </div>
+  <div class="overall-badge">
+    <div class="overall-score">90.5%</div>
+    <div class="overall-label">Overall Score</div>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Summary -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">Component Summary</span>
+      <span class="muted">12 components evaluated</span>
+    </div>
+    <div class="card-body">
+      <table class="tbl" style="margin:0">
+        <thead><tr><th>Component</th><th>Score</th><th>Grade</th><th>Status</th></tr></thead>
+        <tbody><tr><td><strong>Dataset</strong></td><td style="color:#ef4444;font-weight:800">59.3%</td><td>POOR</td><td><span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">WARN</span></td></tr><tr><td><strong>Drug Lookup</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Ner</strong></td><td style="color:#f59e0b;font-weight:800">76.2%</td><td>GOOD</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Safety</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Conversation Memory</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Chat Engine</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Rag</strong></td><td style="color:#ef4444;font-weight:800">0.0%</td><td>—</td><td><span style="background:#94a3b8;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">SKIP</span></td></tr><tr><td><strong>Activity Metrics</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Ocr</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">WARN</span></td></tr><tr><td><strong>Faiss</strong></td><td style="color:#fb923c;font-weight:800">60.0%</td><td>FAIR</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Llm</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr><tr><td><strong>Pytest</strong></td><td style="color:#22c55e;font-weight:800">100.0%</td><td>EXCELLENT</td><td><span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">1 · Dataset Quality</span>
+              <span class="card-elapsed">1.54s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:59.3;--clr:#ef4444">
+                <span>59%</span>
+              </div>
+              <span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">WARN</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">3869</div><div class="metric-lbl">Total Drugs</div></div>
+        <div class="metric-box"><div class="metric-val">0</div><div class="metric-lbl">Duplicates</div></div>
+        <div class="metric-box"><div class="metric-val">59.3%</div><div class="metric-lbl">Avg Coverage</div></div>
+      </div>
+      <table class="tbl"><thead><tr><th>Field</th><th>Coverage</th><th>%</th></tr></thead>
+      <tbody><tr><td>Generic Name</td><td><div class="bar-track"><div class="bar-fill" style="width:100.0%;background:#22c55e"></div></div></td><td style="font-weight:700;color:#22c55e">100.0%</td></tr><tr><td>Drug Class</td><td><div class="bar-track"><div class="bar-fill" style="width:25.0%;background:#ef4444"></div></div></td><td style="font-weight:700;color:#ef4444">25.0%</td></tr><tr><td>Indications</td><td><div class="bar-track"><div class="bar-fill" style="width:88.0%;background:#f59e0b"></div></div></td><td style="font-weight:700;color:#f59e0b">88.0%</td></tr><tr><td>Dosage And Administration</td><td><div class="bar-track"><div class="bar-fill" style="width:88.0%;background:#f59e0b"></div></div></td><td style="font-weight:700;color:#f59e0b">88.0%</td></tr><tr><td>Warnings</td><td><div class="bar-track"><div class="bar-fill" style="width:49.4%;background:#ef4444"></div></div></td><td style="font-weight:700;color:#ef4444">49.4%</td></tr><tr><td>Contraindications</td><td><div class="bar-track"><div class="bar-fill" style="width:51.4%;background:#ef4444"></div></div></td><td style="font-weight:700;color:#ef4444">51.4%</td></tr><tr><td>Common Side Effects</td><td><div class="bar-track"><div class="bar-fill" style="width:13.1%;background:#ef4444"></div></div></td><td style="font-weight:700;color:#ef4444">13.1%</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">2 · Drug Lookup Accuracy</span>
+              <span class="card-elapsed">1.42s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:100.0;--clr:#22c55e">
+                <span>100%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">20/20</div><div class="metric-lbl">Passed</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Accuracy</div></div>
+        <div class="metric-box"><div class="metric-val">11.4ms</div><div class="metric-lbl">Avg Latency</div></div>
+      </div>
+      <table class="tbl"><thead><tr><th>Query</th><th>Type</th><th>Expected</th><th>Got</th><th>Latency</th><th>Pass</th></tr></thead>
+      <tbody><tr class="pass"><td>metformin</td><td>exact match</td><td>metformin</td><td>metformin</td><td>2.3ms</td><td>OK</td></tr><tr class="pass"><td>paracetamol</td><td>alias match</td><td>acetaminophen</td><td>acetaminophen</td><td>2.1ms</td><td>OK</td></tr><tr class="pass"><td>tylenol</td><td>brand alias</td><td>acetaminophen</td><td>acetaminophen</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>aspirin</td><td>exact match</td><td>aspirin</td><td>aspirin 81 mg</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>atorvastatin</td><td>exact match</td><td>atorvastatin</td><td>atorvastatin calcium</td><td>57.6ms</td><td>OK</td></tr><tr class="pass"><td>albuterol</td><td>exact match</td><td>albuterol</td><td>albuterol</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>amoxicillin</td><td>exact match</td><td>amoxicillin</td><td>amoxicillin</td><td>2.1ms</td><td>OK</td></tr><tr class="pass"><td>azithromycin</td><td>exact match</td><td>azithromycin</td><td>azithromycin</td><td>1.5ms</td><td>OK</td></tr><tr class="pass"><td>furosemide</td><td>exact match</td><td>furosemide</td><td>furosemide</td><td>1.6ms</td><td>OK</td></tr><tr class="pass"><td>simvastatin</td><td>exact match</td><td>simvastatin</td><td>simvastatin</td><td>2.8ms</td><td>OK</td></tr><tr class="pass"><td>naproxen</td><td>exact match</td><td>naproxen</td><td>naproxen</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>omeprazole</td><td>exact match</td><td>omeprazole</td><td>omeprazole</td><td>3.1ms</td><td>OK</td></tr><tr class="pass"><td>clopidogrel</td><td>exact match</td><td>clopidogrel</td><td>clopidogrel</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>amlodipine</td><td>exact match</td><td>amlodipine</td><td>amlodipine besylate</td><td>49.5ms</td><td>OK</td></tr><tr class="pass"><td>metfromin</td><td>typo tolerance</td><td>metformin</td><td>metformin</td><td>52.5ms</td><td>OK</td></tr><tr class="pass"><td>paracetemol</td><td>typo tolerance</td><td>acetaminophen</td><td>acetaminophen</td><td>2.1ms</td><td>OK</td></tr><tr class="pass"><td>salbutamol</td><td>synonym match</td><td>albuterol</td><td>albuterol</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>Aspirin 81mg</td><td>dosage strip</td><td>aspirin</td><td>aspirin 81 mg</td><td>0.0ms</td><td>OK</td></tr><tr class="pass"><td>Metformin 500 mg</td><td>dosage strip</td><td>metformin</td><td>metformin</td><td>1.0ms</td><td>OK</td></tr><tr class="pass"><td>xyzunknowndrug123</td><td>gibberish no match</td><td>(no match)</td><td>(no match)</td><td>44.0ms</td><td>OK</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">3 · NER Drug Extraction</span>
+              <span class="card-elapsed">8.59s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:76.2;--clr:#f59e0b">
+                <span>76%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">66.7%</div><div class="metric-lbl">Precision</div></div>
+        <div class="metric-box"><div class="metric-val">88.9%</div><div class="metric-lbl">Recall</div></div>
+        <div class="metric-box"><div class="metric-val">76.2%</div><div class="metric-lbl">F1 Score</div></div>
+      </div>
+      <table class="tbl"><thead><tr><th>Prescription Text</th><th>Expected Drugs</th><th>Extracted</th><th>Scores</th></tr></thead>
+      <tbody><tr><td title="Patient takes Metformin 500mg twice daily and Lisinopril 10mg once daily.…">Patient takes Metformin 500mg twice daily and Lisinopril 10m…</td><td>lisinopril, metformin</td><td>metformin</td><td>TP:1 FP:0 FN:1</td></tr><tr><td title="Prescription: Aspirin 81mg OD, Atorvastatin 40mg at night.…">Prescription: Aspirin 81mg OD, Atorvastatin 40mg at night.……</td><td>atorvastatin, aspirin</td><td>aspirin 81 mg, atorvastatin calcium, doxylamine succinate</td><td>TP:2 FP:1 FN:0</td></tr><tr><td title="Salbutamol inhaler 2 puffs PRN. Fluticasone 250mcg BD.…">Salbutamol inhaler 2 puffs PRN. Fluticasone 250mcg BD.……</td><td>fluticasone, albuterol</td><td>acetaminophen guaifenesin, albuterol, fluticasone furoate, fluticasone propionate, levmetamfetamine</td><td>TP:2 FP:2 FN:0</td></tr><tr><td title="T. Metformin 500mg BD. T. Amlodipine 5mg OD.…">T. Metformin 500mg BD. T. Amlodipine 5mg OD.……</td><td>amlodipine, metformin</td><td>amlodipine besylate, metformin</td><td>TP:2 FP:0 FN:0</td></tr><tr><td title="Patient requires ibuprofen 400mg TDS for pain management.…">Patient requires ibuprofen 400mg TDS for pain management.……</td><td>ibuprofen</td><td>ibuprofen diphenhydramine hcl, reuseable pain</td><td>TP:1 FP:1 FN:0</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">4 · Safety Layer</span>
+              <span class="card-elapsed">0.0s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:100.0;--clr:#22c55e">
+                <span>100%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Emergency Recall</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Safe-phrase Precision</div></div>
+        <div class="metric-box"><div class="metric-val">8/8</div><div class="metric-lbl">Emergencies Caught</div></div>
+        <div class="metric-box"><div class="metric-val">0/5</div><div class="metric-lbl">False Positives</div></div>
+      </div></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">5 · OCR Pipeline</span>
+              <span class="card-elapsed">4.75s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:100.0;--clr:#22c55e">
+                <span>100%</span>
+              </div>
+              <span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">WARN</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val" style="font-size:14px">none detected</div><div class="metric-lbl">Engines</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Text Hit Rate</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Preprocessing</div></div>
+        <div class="metric-box"><div class="metric-val">222.4ms</div><div class="metric-lbl">Avg Latency</div></div>
+      </div>
+      <div class="metric-row" style="flex-wrap:wrap;gap:8px;font-size:13px">
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Abbreviation stripping: 5/5</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Safe tokens intact: 4/4</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Scoring logic: OK</span>
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:4px 10px">Text cleaning: 2/2</span>
+      </div>
+      <table class="tbl"><thead><tr><th>Case</th><th>Input text</th><th>Expected</th><th>Found</th><th>Latency</th><th>Result</th></tr></thead><tbody><tr class="pass"><td>two-drug prescription</td><td title="Metformin 500mg BD
+Lisinopril 10mg OD">Metformin 500mg BD
+Lisinopril 10mg OD...</td><td>metformin, lisinopril</td><td>metformin</td><td>124.2ms</td><td>OK</td></tr><tr class="pass"><td>tablet-prefix prescription</td><td title="T. Aspirin 81mg OD
+T. Atorvastatin 40mg at night">T. Aspirin 81mg OD
+T. Atorvastatin 40mg at night...</td><td>aspirin, atorvastatin</td><td>aspirin 81 mg, atorvastatin calcium, doxylamine succinate</td><td>380.2ms</td><td>OK</td></tr><tr class="pass"><td>inhaler prescription</td><td title="Salbutamol 2 puffs PRN
+Fluticasone 250mcg BD inhaled">Salbutamol 2 puffs PRN
+Fluticasone 250mcg BD inhal...</td><td>albuterol, fluticasone, salbutamol</td><td>albuterol, fluticasone propionate</td><td>363.5ms</td><td>OK</td></tr><tr class="pass"><td>injection + tablet (prefix stripping)</td><td title="Inj. Insulin 10 units SC nocte
+T. Metformin 1000mg BD">Inj. Insulin 10 units SC nocte
+T. Metformin 1000mg...</td><td>insulin, metformin</td><td>metformin, human insulin</td><td>129.8ms</td><td>OK</td></tr><tr class="pass"><td>NSAID + analgesic</td><td title="Ibuprofen 400mg TDS after food
+Paracetamol 500mg PRN">Ibuprofen 400mg TDS after food
+Paracetamol 500mg P...</td><td>ibuprofen, acetaminophen, paracetamol</td><td>acetaminophen, ibuprofen diphenhydramine hcl</td><td>114.2ms</td><td>OK</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">6 · FAISS Semantic Search</span>
+              <span class="card-elapsed">14.59s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:60.0;--clr:#fb923c">
+                <span>60%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">3869</div><div class="metric-lbl">Indexed Vectors</div></div>
+        <div class="metric-box"><div class="metric-val">384</div><div class="metric-lbl">Dimensions</div></div>
+        <div class="metric-box"><div class="metric-val">60.0%</div><div class="metric-lbl">Hit Rate</div></div>
+        <div class="metric-box"><div class="metric-val">26.0ms</div><div class="metric-lbl">Avg Latency</div></div>
+      </div>
+      <table class="tbl"><thead><tr><th>Query</th><th>Expected (any)</th><th>Top-3 Results</th><th>Score</th><th>Latency</th><th>Hit</th></tr></thead><tbody><tr class="pass"><td>diabetes medication blood sugar</td><td>metformin, insulin, glipizide</td><td>glyburide, rezvoglar kwikpen, glipizide er</td><td>0.57</td><td>28.0ms</td><td>OK</td></tr><tr class="fail"><td>blood pressure hypertension</td><td>lisinopril, amlodipine, losartan</td><td>midodrine hydrochloride, phenylephrine hci, nipride rtu</td><td>0.439</td><td>27.3ms</td><td>FAIL</td></tr><tr class="fail"><td>asthma inhaler breathing</td><td>albuterol, fluticasone, salbutamol</td><td>air, ammonia, primatene mist</td><td>0.618</td><td>24.5ms</td><td>FAIL</td></tr><tr class="pass"><td>pain relief anti-inflammatory</td><td>ibuprofen, aspirin, naproxen</td><td>cvs arthritis pain relief, pain relief, pain relief</td><td>0.649</td><td>25.4ms</td><td>OK</td></tr><tr class="pass"><td>cholesterol statin heart disease</td><td>atorvastatin, simvastatin, rosuvastatin</td><td>fluvastatin, atorvastatin calcium, atorvastatin calcium</td><td>0.497</td><td>25.0ms</td><td>OK</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">7 · LLM Response Quality</span>
+              <span class="card-elapsed">2.24s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:100.0;--clr:#22c55e">
+                <span>100%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Keyword Score</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Disclaimer Rate</div></div>
+      </div>
+      <table class="tbl"><thead><tr><th>Question</th><th>Context</th><th>Keywords</th><th>Disclaimer</th><th>Latency</th></tr></thead><tbody><tr><td>What are the common side effects of metformin?</td><td>diabetes / age 55</td><td>4/4</td><td>OK</td><td>1083ms</td></tr><tr><td>Is lisinopril safe for elderly patients?</td><td>hypertension / age 72</td><td>4/4</td><td>OK</td><td>1150ms</td></tr></tbody></table></div>
+        </div>
+  
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <span class="card-title">8 · Automated Test Suite</span>
+              <span class="card-elapsed">43.3s</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div class="score-ring" style="--pct:100.0;--clr:#22c55e">
+                <span>100%</span>
+              </div>
+              <span style="background:#22c55e;color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:800;letter-spacing:.06em">PASS</span>
+            </div>
+          </div>
+          <div class="card-body">
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-val">97</div><div class="metric-lbl">Tests Passed</div></div>
+        <div class="metric-box"><div class="metric-val">0</div><div class="metric-lbl">Tests Failed</div></div>
+        <div class="metric-box"><div class="metric-val">100.0%</div><div class="metric-lbl">Pass Rate</div></div>
+      </div>
+      <pre class="code-block">........................................................................ [ 74%]
+.........................                                                [100%]
+97 passed in 39.73s</pre></div>
+        </div>
+</div>
+</body>
+</html>
