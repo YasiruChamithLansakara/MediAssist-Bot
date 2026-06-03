@@ -327,15 +327,9 @@ def warmup_embeddings() -> None:
 
 
 def is_available() -> bool:
-    """Return True if a semantic (non-TF-IDF) embedding backend is ready."""
+    """True when a semantic (non-TF-IDF) backend is active and ready."""
     try:
         svc = _get_service()
-        return svc.is_ready() and "TFIDF" not in svc.backend_name
+        return svc.is_ready() and not isinstance(svc._backend, _TFIDFBackend)
     except Exception:
         return False
-
-
-def is_available() -> bool:
-    """True when a *semantic* backend (sentence-transformers or OpenAI) is active."""
-    svc = _get_service()
-    return svc.is_ready() and not isinstance(svc._backend, _TFIDFBackend)

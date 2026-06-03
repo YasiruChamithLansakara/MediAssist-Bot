@@ -1,4 +1,13 @@
 # Improve by Yasiru
+
+# Load .env FIRST — before any app module is imported so that os.getenv()
+# calls in drug_lookup.py, embeddings.py etc. see the correct values.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)   # don't override vars already set in the shell
+except ImportError:
+    pass
+
 import os
 import time
 import uuid

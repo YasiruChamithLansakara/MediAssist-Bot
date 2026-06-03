@@ -998,6 +998,24 @@ textarea:focus {
 .searchBtn:hover { opacity: 0.88; }
 .searchBtn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.searchClearBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  margin-right: 2px;
+}
+.searchClearBtn:hover { background: var(--red-soft); color: var(--red-text); }
+
 /* Lookup empty state */
 .lookupEmptyState {
   padding: 32px 20px 28px;
@@ -1080,10 +1098,15 @@ textarea:focus {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.chatClearBtn:hover {
-  background: rgba(239, 68, 68, 0.18);
+.chatClearBtn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
   color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.35);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.chatClearBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* ── OCR confidence banner (replaces old .confidenceBar) ─────────────────── */
@@ -1201,6 +1224,18 @@ textarea:focus {
 .msgHeading {
   font-weight: 800;
   font-size: 15px;
+}
+
+/* Drug name rendered from "• *Name*" or "**Name**" — prominent heading */
+.msgDrugName {
+  margin: 10px 0 2px;
+  padding: 5px 10px 5px 12px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  background: var(--blue-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
 }
 
 .msgBullet {
@@ -1343,6 +1378,34 @@ textarea:focus {
   align-self: flex-end;
   min-width: 80px;
 }
+
+/* ── Universal clear button ─────────────────────────────────────────────── */
+.clearBtn {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  background: transparent;
+  color: var(--red-text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.clearBtn:hover:not(:disabled) {
+  background: var(--red-soft);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.clearBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Upload actions row: Extract + Clear side by side */
+.uploadActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.uploadActions .primaryButton { flex: 1; }
 
 /* ── Prescription "send all" button ─────────────────────────────────────── */
 .detectedActions {

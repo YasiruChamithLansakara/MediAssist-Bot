@@ -127,5 +127,8 @@ dist/
 *.sqlite3
 *.db
 
-# Generated validation reports
+# Generated reports (run scripts/evaluate_pipeline.py to regenerate)
 validation_report.json
+reports/*.json
+reports/*.html
+reports/*.md

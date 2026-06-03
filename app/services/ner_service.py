@@ -108,9 +108,10 @@ _PRESCRIPTION_PREFIX_RE = re.compile(
 def _clean_prescription_text(text: str) -> str:
     """Strip common prescription shorthands that break drug name extraction."""
     text = _PRESCRIPTION_PREFIX_RE.sub(" ", text or "")
-    # Split word-digit run-ons from OCR: "Metformin500mg" → "Metformin 500mg"
-    # Only when there are 3+ letters (avoids breaking "D2", "B12", "T3")
-    text = re.sub(r"([A-Za-z]{3,})(\d)", r"\1 \2", text)
+    # Split OCR run-ons like "Metformin500mg" → "Metformin 500mg".
+    # Require 4+ letters so legitimate tokens like "HbA1c", "B12", "T3",
+    # "COVID19", "Omega3" are never split (they all start with ≤3 letters).
+    text = re.sub(r"([A-Za-z]{4,})(\d)", r"\1 \2", text)
     return re.sub(r"\s+", " ", text).strip()
 
 # Minimum character length for a candidate to be considered a drug name
@@ -263,13 +264,19 @@ def _entity_key(best_match: Dict[str, Any], fallback: str) -> str:
     )
 
 
+_NON_DRUG_FRAGMENTS = {
+    "formula", "relief", "management", "supplement", "booster",
+    "complex", "blend", "extract", "support", "therapy",
+}
+
+
 def extract_medication_entities(
     text: str,
     *,
     disease: str,
     age: int,
     max_entities: int = 5,
-    min_confidence: float = 0.78,
+    min_confidence: float = 0.84,
 ) -> List[Dict[str, Any]]:
     """
     OCR-path medication extraction.
@@ -317,7 +324,17 @@ def extract_medication_entities(
                 best_match.get("generic_name_clean")
                 or best_match.get("generic_name")
                 or result.get("normalized")
+                or ""
             )
+
+            # Reject very short resolved names (e.g. "ibu", "tin") and
+            # product-description phrases that aren't real drug names.
+            name_lower = name.lower()
+            if len(name_lower) < 4:
+                continue
+            if any(frag in name_lower for frag in _NON_DRUG_FRAGMENTS):
+                continue
+
             entities.append(
                 {
                     "text": segment,

@@ -135,7 +135,10 @@ class ConversationMemory:
             history = self._memory.get(session_id, [])
 
             if max_turns and len(history) > max_turns:
-                history = history[-max_turns:]
+                # Always keep turn 0 (holds initial disease/age context) plus
+                # the (max_turns - 1) most recent turns.  Plain [-max_turns:]
+                # would silently drop turn 0 for long sessions.
+                history = history[:1] + history[-(max_turns - 1):]
 
             return list(history)
 
