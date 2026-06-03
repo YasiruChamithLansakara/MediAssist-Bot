@@ -346,6 +346,141 @@ def eval_safety() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 4b. Conversation Memory
+# ══════════════════════════════════════════════════════════════════════════════
+
+def eval_conversation_memory() -> Dict[str, Any]:
+    print("\n[4b/8] Conversation memory …")
+    t0 = time.time()
+    try:
+        from app.services.conversation_memory import (
+            get_conversation_memory,
+            add_turn_to_memory,
+            get_conversation_history,
+            get_context_summary,
+        )
+
+        mem = get_conversation_memory()
+        sid = "eval-session-001"
+        # ensure clean state
+        mem.clear_session(sid)
+
+        add_turn_to_memory(sid, "user", "Hello, I take metformin", disease="diabetes", age=55)
+        add_turn_to_memory(sid, "assistant", "Noted. How can I help?", disease="diabetes", age=55)
+
+        history = get_conversation_history(sid)
+        summary = get_context_summary(sid)
+
+        turn_count = summary.get("turn_count", 0)
+        ok = turn_count >= 2
+
+        print(f"    OK turns={turn_count} sessions={len(mem.get_all_sessions())}")
+        return {
+            "turn_count": turn_count,
+            "history_sample": history[:4],
+            "summary": summary,
+            "elapsed_s": round(time.time() - t0, 2),
+            "score_pct": 100.0 if ok else 0.0,
+            "status": "PASS" if ok else "WARN",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "score_pct": 0.0, "status": "FAIL",
+                "elapsed_s": round(time.time() - t0, 2)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4c. Chat Engine (end-to-end smoke)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def eval_chat_engine() -> Dict[str, Any]:
+    print("\n[4c/8] Chat engine …")
+    t0 = time.time()
+    try:
+        from app.services.chat_engine import build_chat_response
+
+        cases = [
+            {"msg": "What are the common side effects of metformin?", "expect_emergency": False},
+            {"msg": "I have severe chest pain and cant breathe", "expect_emergency": True},
+        ]
+
+        passed = 0
+        results: List[Dict[str, Any]] = []
+
+        for c in cases:
+            out = build_chat_response(message=c["msg"], disease="diabetes", age=60, drugs=[])
+            detected = bool(out.get("is_emergency"))
+            ok = detected == c["expect_emergency"]
+            if ok:
+                passed += 1
+            results.append({"msg": c["msg"], "is_emergency": detected, "ok": ok, "excerpt": out.get("answer","")[:200]})
+
+        acc = _pct(passed, len(cases))
+        print(f"    OK {passed}/{len(cases)} chat cases correct ({acc}%)")
+        return {
+            "total": len(cases), "passed": passed, "accuracy_pct": acc,
+            "cases": results, "elapsed_s": round(time.time() - t0, 2),
+            "score_pct": acc, "status": "PASS" if acc >= 80 else "WARN",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "score_pct": 0.0, "status": "FAIL",
+                "elapsed_s": round(time.time() - t0, 2)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4d. RAG shim
+# ══════════════════════════════════════════════════════════════════════════════
+
+def eval_rag() -> Dict[str, Any]:
+    print("\n[4d/8] RAG shim …")
+    t0 = time.time()
+    try:
+        from app.services.rag_service import get_rag_status, is_rag_available
+
+        status = get_rag_status()
+        available = is_rag_available()
+
+        print(f"    OK RAG available={available}")
+        return {"status_detail": status, "available": available,
+                "elapsed_s": round(time.time() - t0, 2),
+                "score_pct": 100.0 if available else 0.0,
+                "status": "PASS" if available else "SKIP"}
+    except Exception as exc:
+        return {"error": str(exc), "score_pct": 0.0, "status": "FAIL",
+                "elapsed_s": round(time.time() - t0, 2)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4e. Activity metrics
+# ══════════════════════════════════════════════════════════════════════════════
+
+def eval_activity_metrics() -> Dict[str, Any]:
+    print("\n[4e/8] Activity metrics …")
+    t0 = time.time()
+    try:
+        from app.services.activity_metrics import record_activity, get_activity_snapshot, get_activity_metrics
+
+        metrics = get_activity_metrics()
+        # record a few events
+        record_activity("lookup", success=True, status_code=200, detail="lookup ok", context={})
+        record_activity("chat", success=True, status_code=200, detail="chat ok", context={})
+        record_activity("ocr", success=False, status_code=500, detail="ocr fail", context={"engine": "tesseract"})
+
+        snap = get_activity_snapshot()
+        counts = snap.get("counts", {})
+
+        ok = counts.get("lookup", 0) >= 1 and counts.get("chat", 0) >= 1
+
+        print(f"    OK counts={counts}")
+        return {"snapshot": snap, "counts": counts,
+                "elapsed_s": round(time.time() - t0, 2),
+                "score_pct": 100.0 if ok else 0.0,
+                "status": "PASS" if ok else "WARN"}
+    except Exception as exc:
+        return {"error": str(exc), "score_pct": 0.0, "status": "FAIL",
+                "elapsed_s": round(time.time() - t0, 2)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 5. OCR PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1132,6 +1267,10 @@ def main():
             "drug_lookup": eval_drug_lookup(),
             "ner":        eval_ner(),
             "safety":     eval_safety(),
+            "conversation_memory": eval_conversation_memory(),
+            "chat_engine": eval_chat_engine(),
+            "rag":        eval_rag(),
+            "activity_metrics": eval_activity_metrics(),
             "ocr":        eval_ocr(),
             "faiss":      eval_faiss(),
             "llm":        eval_llm(skip=args.no_llm),
