@@ -53,19 +53,45 @@ class _SentenceTransformersBackend:
     def _try_load(self):
         try:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(_ST_MODEL_NAME)
-            self._ready = True
-            logger.info(
-                "EmbeddingService: sentence-transformers loaded (%s, dim=%d)",
-                _ST_MODEL_NAME, self.dim,
-            )
+
+            # Strategy: try local cache first (no network needed).
+            # Falls back to online download only if the model is not cached yet.
+            # This prevents startup failures when HuggingFace Hub is unreachable
+            # (DNS error, no internet, firewall) on machines where the model has
+            # already been downloaded in a previous run.
+            loaded = False
+            for local_only in (True, False):
+                try:
+                    self._model = SentenceTransformer(
+                        _ST_MODEL_NAME,
+                        local_files_only=local_only,
+                    )
+                    self._ready = True
+                    loaded = True
+                    src = "local cache" if local_only else "HuggingFace Hub"
+                    logger.info(
+                        "EmbeddingService: sentence-transformers loaded from %s (%s, dim=%d)",
+                        src, _ST_MODEL_NAME, self.dim,
+                    )
+                    break
+                except Exception as inner:
+                    if local_only:
+                        # Cache miss — try online next
+                        logger.debug("Local cache miss, trying online: %s", inner)
+                    else:
+                        logger.warning("sentence-transformers load failed: %s", inner)
+
+            if not loaded:
+                logger.warning(
+                    "sentence-transformers unavailable (no cache, no network). "
+                    "Connect to the internet once to download the model."
+                )
+
         except ImportError:
             logger.warning(
                 "sentence-transformers not installed — run: "
                 "pip install sentence-transformers"
             )
-        except Exception as exc:
-            logger.warning("sentence-transformers load failed: %s", exc)
 
     @property
     def ready(self) -> bool:
