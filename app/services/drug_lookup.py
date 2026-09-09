@@ -37,6 +37,95 @@ OK_THRESHOLD = 0.85
 LOW_THRESHOLD = 0.60
 PARACETAMOL_TYPO_THRESHOLD = 85
 
+# ---------------------------------------------------------------------
+# INGREDIENT IDENTITY
+# ---------------------------------------------------------------------
+# Fuzzy string similarity CANNOT decide drug identity. Measured on this
+# dataset with rapidfuzz:
+#
+#     prednisone   vs prednisolone   ratio 90.9   <- DIFFERENT drugs
+#     metfarmin    vs metformin      ratio 88.9   <- a typo for the same drug
+#     lisinopril   vs fosinopril     ratio 80.0   <- DIFFERENT drugs
+#
+# The distributions overlap, so no cutoff separates "typo" from "different
+# molecule". Before this guard existed, `lookup_drug("lisinopril")` returned
+# fosinopril at confidence 0.80 and the chat layer presented that drug's
+# dosing and warnings as the answer — a wrong-drug response for a drug that
+# is simply absent from the knowledge base.
+#
+# Policy: identity is established by an EXACT base-ingredient match (after
+# salt/ester stripping) or by an alias. Anything else is a *suggestion*,
+# returned without clinical fields for the user to confirm.
+INGREDIENT_TYPO_RATIO = 94.0     # near-certain typo, still needs confirmation
+AMBIGUITY_MARGIN = 4.0           # runner-up must be this far behind
+
+# Salt, ester, hydrate and formulation tokens. Stripping these makes
+# "amlodipine besylate" and "amlodipine" the same ingredient, which is the
+# single biggest recall win available on this dataset.
+_SALT_TOKENS = {
+    "hydrochloride", "hcl", "hydrobromide", "hbr", "hydroiodide",
+    "sodium", "potassium", "calcium", "magnesium", "zinc", "aluminum",
+    "besylate", "mesylate", "maleate", "tartrate", "bitartrate",
+    "succinate", "fumarate", "citrate", "acetate", "phosphate",
+    "sulfate", "sulphate", "nitrate", "bromide", "chloride", "iodide",
+    "valerate", "propionate", "furoate", "dipropionate", "butyrate",
+    "mesilate", "tosylate", "oxalate", "pamoate", "embonate",
+    "gluconate", "lactate", "malate", "carbonate", "bicarbonate",
+    "benzoate", "salicylate", "stearate", "palmitate", "decanoate",
+    "lysine", "arginine", "meglumine", "trometamol", "tromethamine",
+    "monohydrate", "dihydrate", "trihydrate", "hemihydrate", "anhydrous",
+    "micronized", "micronised", "axetil", "estolate", "proxetil",
+    "disodium", "dipotassium", "hemifumarate", "xinafoate", "aceponate",
+}
+
+# Formulation adjectives that are not part of the ingredient identity.
+_FORM_TOKENS = {
+    "film", "coated", "extended", "release", "delayed", "immediate",
+    "oral", "nasal", "topical", "inhalation", "ophthalmic", "otic",
+    "chewable", "dispersible", "effervescent", "sustained", "modified",
+    "powder", "solution", "suspension", "gel", "cream", "ointment",
+    "spray", "aerosol", "concentrate", "kit", "usp", "er", "xr", "sr", "dr",
+}
+
+_INGREDIENT_SPLIT_RE = re.compile(r"\s*(?:,|/|\+|;|\band\b|\bwith\b)\s*", re.IGNORECASE)
+
+
+def split_ingredients(name: str) -> List[str]:
+    """Split a product name into its active-ingredient parts."""
+    if not name:
+        return []
+    parts = [p.strip() for p in _INGREDIENT_SPLIT_RE.split(str(name)) if p and p.strip()]
+    return parts or [str(name).strip()]
+
+
+def base_ingredient(name: str) -> str:
+    """
+    Reduce one ingredient name to its base molecule.
+
+        "amlodipine besylate"        -> "amlodipine"
+        "atorvastatin calcium coated"-> "atorvastatin"
+        "fluticasone propionate"     -> "fluticasone"
+
+    If stripping would remove everything, the normalised name is kept — some
+    drugs genuinely are salts (e.g. "potassium chloride").
+    """
+    norm = normalize_text(name)
+    if not norm:
+        return ""
+    tokens = [t for t in norm.split() if t not in _SALT_TOKENS and t not in _FORM_TOKENS]
+    return " ".join(tokens) if tokens else norm
+
+
+def ingredient_key(name: str) -> str:
+    """Canonical multi-ingredient key: base of every part, order preserved."""
+    bases = [base_ingredient(p) for p in split_ingredients(name)]
+    return " ".join(b for b in bases if b)
+
+
+def ingredient_set(name: str) -> set[str]:
+    """The set of base ingredients in a product name."""
+    return {b for b in (base_ingredient(p) for p in split_ingredients(name)) if b}
+
 SUPPORTED_DISEASES = [
     "diabetes",
     "hypertension",
@@ -55,6 +144,13 @@ _index: Dict[str, Dict[str, Any]] = {}
 _keys_all: List[str] = []
 _keys_primary: List[str] = []
 _store_lock = threading.Lock()
+
+# Ingredient-identity indexes (see INGREDIENT IDENTITY above).
+#   _base_index       full canonical key ("amlodipine", "ibuprofen famotidine") -> rows
+#   _ingredient_index single ingredient  ("ibuprofen") -> every row containing it
+_base_index: Dict[str, List[Dict[str, Any]]] = {}
+_ingredient_index: Dict[str, List[Dict[str, Any]]] = {}
+_base_keys: List[str] = []
 
 
 # ---------------------------------------------------------------------
@@ -357,6 +453,8 @@ def make_response(
     resolution_path: List[str],
     disease: Optional[str] = None,
     age: Optional[int] = None,
+    needs_confirmation: bool = False,
+    identity_note: str = "",
 ) -> Dict[str, Any]:
     best_match = matches[0] if matches else None
     best_score = float(best_match.get("score", 0.0)) if best_match else 0.0
@@ -379,7 +477,13 @@ def make_response(
         "message": message,
         "match_type": match_type,
         "resolution_path": path,
+        # True when the match was not established by exact ingredient identity
+        # or alias. Callers must present these as "did you mean …?" rather
+        # than as the answer.
+        "needs_confirmation": bool(needs_confirmation),
     }
+    if identity_note:
+        resp["identity_note"] = identity_note
 
     # include context if provided (service-level contract)
     if disease is not None or age is not None:
@@ -414,7 +518,7 @@ def _strip_brand_suffix(s: str) -> str:
 
 
 def init_store(csv_path: str = DEFAULT_CSV_PATH) -> None:
-    global _df, _index, _keys_all, _keys_primary
+    global _df, _index, _keys_all, _keys_primary, _base_index, _ingredient_index, _base_keys
 
     if _df is not None:
         return
@@ -456,8 +560,19 @@ def init_store(csv_path: str = DEFAULT_CSV_PATH) -> None:
             # collision -> skip
             return
 
+        base_index: Dict[str, List[Dict[str, Any]]] = {}
+        ingredient_index: Dict[str, List[Dict[str, Any]]] = {}
+        rows: List[Dict[str, Any]] = []
+
+        # ---- Pass 1: generic names and ingredient identity -------------
+        # Generics are indexed before brands so that a brand name can never
+        # claim a key an ingredient needs. Previously "ibuprofen" was claimed
+        # as a BRAND of a diphenhydramine combination product, so looking up
+        # ibuprofen returned that combination at match_type="exact",
+        # confidence 1.0 — indistinguishable from a correct answer.
         for _, row in df.iterrows():
             row_dict = row.to_dict()
+            rows.append(row_dict)
 
             gen_clean = normalize_text(row_dict.get("generic_name_clean", ""))
             gen_name = normalize_text(row_dict.get("generic_name", ""))
@@ -473,21 +588,41 @@ def init_store(csv_path: str = DEFAULT_CSV_PATH) -> None:
                 _safe_set_key(gen_name, row_dict)
                 primary_keys.add(gen_name)
 
-            # brand indexing: split + ignore "...(+X more)" suffix
+            # Ingredient identity, from the cleanest name available.
+            source_name = row_dict.get("generic_name_clean") or row_dict.get("generic_name") or ""
+            canonical = ingredient_key(source_name)
+            if canonical:
+                base_index.setdefault(canonical, []).append(row_dict)
+                for ing in ingredient_set(source_name):
+                    ingredient_index.setdefault(ing, []).append(row_dict)
+
+        # ---- Pass 2: brand names, only into keys nothing else claimed ---
+        for row_dict in rows:
             raw_brands = _strip_brand_suffix(row_dict.get("brand_names") or "")
-            if raw_brands:
-                brand_parts = [b.strip() for b in raw_brands.split(",") if b.strip()]
-                for b in brand_parts[:10]:
-                    bn = normalize_text(b)
-                    if bn and bn not in {"...", "more"}:
-                        _safe_set_key(bn, row_dict)
+            if not raw_brands:
+                continue
+            for b in [b.strip() for b in raw_brands.split(",") if b.strip()][:10]:
+                bn = normalize_text(b)
+                if not bn or bn in {"...", "more"}:
+                    continue
+                # A brand that collides with some drug's base ingredient is
+                # ambiguous by construction — leave it to the ingredient path.
+                if bn in ingredient_index and row_dict not in ingredient_index[bn]:
+                    continue
+                _safe_set_key(bn, row_dict)
 
         _df = df
         _index = index
         _keys_primary = sorted(primary_keys)
         _keys_all = sorted(all_keys)
+        _base_index = base_index
+        _ingredient_index = ingredient_index
+        _base_keys = sorted(base_index.keys())
 
-        print(f"Loaded {len(df):,} drugs | {len(_keys_all):,} lookup keys")
+        print(
+            f"Loaded {len(df):,} drugs | {len(_keys_all):,} lookup keys "
+            f"| {len(_base_index):,} ingredient keys"
+        )
         print(f"Dataset path: {os.path.abspath(csv_path)}")
 
 
@@ -694,7 +829,18 @@ def lookup_drug(
             age=age,
         )
 
-    if q_norm in _index:
+    q_key = ingredient_key(q_norm)
+    q_ings = ingredient_set(q_norm)
+
+    def _ingredients_agree(row: Dict[str, Any]) -> bool:
+        """The indexed row must actually contain what the user asked for."""
+        source = row.get("generic_name_clean") or row.get("generic_name") or ""
+        return bool(q_ings) and q_ings.issubset(ingredient_set(source))
+
+    # 1. Exact key hit — accepted only when the ingredients agree. A raw key
+    #    hit alone is not identity: brand names and combination products can
+    #    own a key that names a different molecule.
+    if q_norm in _index and _ingredients_agree(_index[q_norm]):
         row = _index[q_norm]
         matches = [build_match(row, q_norm, 100.0)]
         return make_response(
@@ -727,88 +873,126 @@ def lookup_drug(
             age=age,
         )
 
-    results = process.extract(
-        q_norm,
-        _keys_all,
-        scorer=fuzz.WRatio,
-        limit=max(top_k, 10),
-        score_cutoff=min_score,
-    )
+    # 3. Exact ingredient identity, after salt/ester stripping.
+    #    "amlodipine" now resolves to "amlodipine besylate" and "atorvastatin"
+    #    to "atorvastatin calcium" — previously both were fuzzy guesses. When
+    #    several products share the ingredient, prefer the one with the fewest
+    #    ingredients so a plain form always beats a combination.
+    def _ingredient_count(row: Dict[str, Any]) -> int:
+        return len(ingredient_set(row.get("generic_name_clean") or row.get("generic_name") or ""))
 
-    if not results:
-        loose = process.extract(
-            q_norm,
-            _suggestion_pool(),
-            scorer=fuzz.WRatio,
-            limit=max(top_k, 15),
-            score_cutoff=max(0.0, min_score - 35),
-        )
-        suggestions = suggestions_from_pool(loose, top_k)
+    if q_key and q_key in _base_index:
+        row = sorted(_base_index[q_key], key=_ingredient_count)[0]
+        key = normalize_text(row.get("generic_name_clean") or row.get("generic_name") or q_norm)
         return make_response(
             query=q_original,
-            normalized=q_norm,
-            message="No confident match found",
-            matches=[],
-            suggestions=suggestions,
-            match_type="none",
-            resolution_path=base_path,
-            disease=disease,
-            age=age,
-        )
-
-    matches: List[Dict[str, Any]] = []
-    seen_ids: set[str] = set()
-
-    for key, score, _ in results:
-        row = _index.get(key)
-        if not row:
-            continue
-
-        drug_id = row.get("drug_id", "") or ""
-        if drug_id and drug_id in seen_ids:
-            continue
-        if drug_id:
-            seen_ids.add(drug_id)
-
-        matches.append(build_match(row, key, float(score)))
-        if len(matches) >= top_k:
-            break
-
-    if not matches:
-        return make_response(
-            query=q_original,
-            normalized=q_norm,
-            message="No confident match found",
-            matches=[],
+            normalized=key or q_norm,
+            message="OK",
+            matches=[build_match(row, key or q_norm, 100.0)],
             suggestions=[],
-            match_type="none",
-            resolution_path=base_path,
+            match_type="ingredient",
+            resolution_path=[q_original, q_norm, q_key],
             disease=disease,
             age=age,
         )
 
-    top_score = float(matches[0].get("score", 0.0))
-    match_type = "fuzzy" if top_score < 99.9 else "exact"
+    # 4. The ingredient is known, but only inside combination products.
+    #    "ibuprofen" is genuinely absent from this dataset as a standalone
+    #    product — it exists only combined with famotidine, diphenhydramine
+    #    or phenylephrine. Saying that is safer than answering with one of
+    #    those combinations as though it were plain ibuprofen.
+    if len(q_ings) == 1:
+        only = next(iter(q_ings))
+        combos = _ingredient_index.get(only) or []
+        if combos:
+            ordered = sorted(combos, key=_ingredient_count)[:top_k]
+            matches = [
+                build_match(
+                    r,
+                    normalize_text(r.get("generic_name_clean") or r.get("generic_name") or only),
+                    80.0,
+                )
+                for r in ordered
+            ]
+            names = [str(r.get("generic_name_clean") or r.get("generic_name") or "") for r in ordered]
+            return make_response(
+                query=q_original,
+                normalized=only,
+                message="Only combination products contain this ingredient",
+                matches=matches,
+                suggestions=_clean_suggestion_list(names, top_k),
+                match_type="combination_only",
+                resolution_path=[q_original, q_norm, only],
+                disease=disease,
+                age=age,
+                needs_confirmation=True,
+                identity_note=(
+                    f"'{only}' is not held as a single-ingredient product. The results "
+                    f"below are combination products that contain it — check the exact "
+                    f"product named on your prescription before relying on this."
+                ),
+            )
 
-    suggest_candidates = process.extract(
-        q_norm,
-        _suggestion_pool(),
-        scorer=fuzz.WRatio,
+    # 5. No ingredient identity could be established. From here fuzzy matching
+    #    may only SUGGEST. It must never answer: on this dataset
+    #    "lisinopril" scores 80 against "fosinopril" and would otherwise be
+    #    served as a confident answer for a completely different molecule.
+    candidate_pool = _base_keys or _keys_primary
+    ranked = process.extract(
+        q_key or q_norm,
+        candidate_pool,
+        scorer=fuzz.ratio,
         limit=max(top_k, 15),
-        score_cutoff=max(0.0, min_score - 35),
+        score_cutoff=45.0,
     )
-    suggestions = suggestions_from_pool(suggest_candidates, top_k)
 
-    normalized_out = matches[0].get("generic_name_clean") or q_norm
+    top_score = float(ranked[0][1]) if ranked else 0.0
+    runner_up = float(ranked[1][1]) if len(ranked) > 1 else 0.0
+    unambiguous = (top_score - runner_up) >= AMBIGUITY_MARGIN
 
+    # A near-certain typo, and nothing else close: return the match but keep
+    # it flagged so the caller asks for confirmation.
+    if ranked and top_score >= INGREDIENT_TYPO_RATIO and unambiguous:
+        best_key = ranked[0][0]
+        row = sorted(_base_index.get(best_key, []), key=_ingredient_count)
+        if row:
+            chosen = row[0]
+            key = normalize_text(
+                chosen.get("generic_name_clean") or chosen.get("generic_name") or best_key
+            )
+            return make_response(
+                query=q_original,
+                normalized=key or best_key,
+                message="Probable spelling variant — confirm before use",
+                matches=[build_match(chosen, key or best_key, min(top_score, 84.0))],
+                suggestions=_clean_suggestion_list([best_key], top_k),
+                match_type="probable_typo",
+                resolution_path=[q_original, q_norm, best_key],
+                disease=disease,
+                age=age,
+                needs_confirmation=True,
+                identity_note=(
+                    f"No exact match for '{q_norm}'. This looks like a misspelling of "
+                    f"'{best_key}', but spelling alone cannot confirm a medicine — check "
+                    f"the name on your prescription."
+                ),
+            )
+
+    # 6. Not confident enough to name a drug. Suggest, and return no data.
+    suggestions = _clean_suggestion_list([k for k, _s, _i in ranked], top_k)
     return make_response(
         query=q_original,
-        normalized=normalized_out,
-        message="OK",
-        matches=matches,
+        normalized=q_norm,
+        message="No confident match found",
+        matches=[],
         suggestions=suggestions,
-        match_type=match_type,
+        match_type="none",
         resolution_path=base_path,
         disease=disease,
         age=age,
+        identity_note=(
+            f"'{q_norm}' is not in the knowledge base. Similar names are listed as "
+            f"suggestions, but they may be different medicines — do not assume a match."
+            if suggestions else ""
+        ),
     )
