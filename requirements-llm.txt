@@ -1,12 +1,28 @@
-# LLM dependencies for MediAssist chat features
-# Install: pip install -r requirements-llm.txt
+# MediAssist — LLM answer generation
 #
-# Primary: Groq API (FREE — Llama 3.1 8B Instant)
-# Sign up at https://console.groq.com
-groq>=0.9.0
+#   pip install -r requirements-llm.txt
+#
+# Primary provider: Groq (free tier, no card).
+#   1. Sign up at https://console.groq.com
+#   2. Create an API key
+#   3. In .env:  LLM_PROVIDER=groq   LLM_API_KEY=gsk_...
+#
+# MODEL NOTE — read before changing LLM_MODEL
+# -------------------------------------------
+# Groq decommissioned `llama-3.1-8b-instant` on 2026-08-16. The current
+# default is `openai/gpt-oss-20b`, Groq's recommended replacement, and
+# app/services/llm_service.py refuses retired model ids at startup and
+# rotates through LLM_MODEL_CHAIN if the active model is rejected.
+#
+# Check what is actually live before pinning a model:
+#   curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"
 
-# Fallback: OpenAI (paid)
-openai>=1.0.0
+groq==1.7.0
 
-# HTTP client (used by all providers as fallback)
-requests>=2.28.0
+# Optional alternative providers. Each needs its OWN key —
+# OPENAI_API_KEY, TOGETHER_API_KEY, HUGGINGFACE_API_KEY — because replaying
+# one vendor's key against another's endpoint leaks the credential and
+# cannot authenticate anyway.
+openai==3.10.0
+
+requests==2.34.2

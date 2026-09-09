@@ -1,15 +1,34 @@
-# RAG / Vector Search dependencies for MediAssist
-# Install: pip install -r requirements-rag.txt
+# MediAssist — hybrid retrieval (dense + lexical) and the second OCR engine
 #
-# Semantic embeddings — LOCAL, FREE, no API key needed (RECOMMENDED)
-sentence-transformers>=2.6.0
+# IMPORTANT — install CPU-only torch first, or pip pulls ~3 GB of CUDA wheels
+# this project never uses (easyocr runs with gpu=False, and the embedding
+# model runs on CPU):
+#
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+#   pip install -r requirements-rag.txt
+#
+# setup_linux.sh does this in the right order.
 
-# FAISS vector index (CPU)
-faiss-cpu>=1.7.4
+# --- Dense retrieval -------------------------------------------------------
+# Local, free, no API key. Downloads ~90 MB of model weights on first run.
+sentence-transformers==6.0.1
+faiss-cpu==1.15.0
 
-# Numeric / ML utilities
-numpy>=1.24.0
-scikit-learn>=1.3.0   # TF-IDF fallback + data processing
+# --- Lexical retrieval -----------------------------------------------------
+# BM25 is the other half of the hybrid search in app/ml/faiss_store.py.
+# Dense vectors answer "medicine for high blood pressure"; BM25 answers
+# "amlodipine". Without this the store silently falls back to dense-only and
+# exact drug-name queries get materially worse.
+rank-bm25==0.2.2
 
-# Optional: OpenAI embeddings (paid, higher quality)
-# openai>=1.0.0
+# --- Second OCR engine -----------------------------------------------------
+# Reads the grayscale image directly; complements Tesseract's binarised path.
+easyocr==1.7.2
+
+# --- Numeric / ML utilities ------------------------------------------------
+scipy==1.18.1
+scikit-learn==1.9.0    # TF-IDF fallback embedding backend
+
+# --- Runtime (installed by the CPU index command above) --------------------
+# torch==2.14.0+cpu
+# torchvision==0.29.0+cpu

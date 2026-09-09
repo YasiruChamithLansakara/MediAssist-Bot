@@ -1,0 +1,30 @@
+# MediAssist — optional biomedical NER
+#
+#   pip install -r requirements-nlp.txt
+#
+# The medication extractor in app/services/ner_service.py has two passes:
+#
+#   1. SciSpaCy biomedical NER            (optional — this file)
+#   2. Rule-based n-grams validated against the drug knowledge base (always on)
+#
+# Pass 2 alone currently measures precision 100% / recall 88.9% on the
+# project's extraction cases, so SciSpaCy is a supplement, not a requirement.
+# If it is absent the service logs a warning and runs rule-based only.
+#
+# PYTHON VERSION CONSTRAINT
+# -------------------------
+# scispacy pins spacy<3.8, whose `thinc` dependency has no wheel for Python
+# 3.13+ and fails to compile from source. On Python 3.14 the install fails
+# with "Failed to build 'thinc'". To use SciSpaCy, create a separate venv on
+# Python 3.11 or 3.12:
+#
+#   python3.12 -m venv .venv-nlp
+#   .venv-nlp/bin/pip install -r requirements-nlp.txt
+#   .venv-nlp/bin/pip install \
+#     https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz
+#
+# spaCy itself installs fine on 3.14 and is pinned here for the tokenizer.
+spacy==3.8.16
+
+# Uncomment on Python <= 3.12 only:
+# scispacy==0.5.4

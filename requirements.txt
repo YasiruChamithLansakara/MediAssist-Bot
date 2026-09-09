@@ -1,24 +1,44 @@
-# Production API dependencies
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic
+# MediAssist — core API dependencies
+#
+# Versions are pinned. Two installs a month apart must produce the same
+# system, otherwise an evaluation score cannot be attributed to a change in
+# the code. Verified together on Python 3.14 (Linux) — see setup_linux.sh.
+#
+#   pip install -r requirements.txt
+#
+# Then, as needed:
+#   pip install -r requirements-rag.txt    # semantic + lexical retrieval
+#   pip install -r requirements-llm.txt    # chat answers
+#   pip install -r requirements-nlp.txt    # optional biomedical NER
 
-# Drug lookup and data handling
-numpy
-pandas
-rapidfuzz
+# --- Web API ---------------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+pydantic==2.13.5
 
-# Prescription OCR
-pytesseract
-Pillow
-easyocr          # hybrid OCR engine (downloads ~200 MB models on first run)
-torchvision      # required by easyocr (matches torch version already installed)
+# --- Drug lookup and data handling ----------------------------------------
+numpy==2.5.3
+pandas==3.0.5
+RapidFuzz==3.14.6
 
-# Utilities
-requests
-python-dotenv
+# --- Prescription OCR ------------------------------------------------------
+# pytesseract is a wrapper: the Tesseract BINARY must also be installed.
+#   Debian/Ubuntu:  sudo apt install tesseract-ocr
+#   Fedora:         sudo dnf install tesseract
+#   macOS:          brew install tesseract
+#   Windows:        install the .exe, then set TESSERACT_CMD in .env
+# EasyOCR is the second engine and lives in requirements-rag.txt because it
+# shares the torch runtime with the embedding model.
+pytesseract==0.3.13
+pillow==12.3.0
 
-# Tests
-pytest
-httpx
+# --- Utilities -------------------------------------------------------------
+requests==2.34.2
+python-dotenv==1.2.3
+
+# --- Tests -----------------------------------------------------------------
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-asyncio==1.4.0
+httpx==0.28.1

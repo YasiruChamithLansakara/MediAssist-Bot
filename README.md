@@ -98,46 +98,46 @@ Chat Interface (UI)
 ## 🗂️ Project Structure
 
 ```text
-MediAssistBot/
+MediAssist-Bot/
 │
 ├── README.md
-├── requirements.txt
-├── .gitignore
+├── setup_linux.sh                  # one-command environment setup + verification
+├── requirements.txt                # core API (pinned)
+├── requirements-rag.txt            # retrieval: faiss, sentence-transformers, rank-bm25, easyocr
+├── requirements-llm.txt            # groq / openai clients
+├── requirements-nlp.txt            # optional biomedical NER (see Python-version note)
+│
+├── app/                            # FastAPI backend
+│ ├── main.py                       # 11 endpoints, middleware, startup warmup
+│ ├── ml/
+│ │ ├── embeddings.py               # sentence-transformers → OpenAI → TF-IDF
+│ │ └── faiss_store.py              # hybrid dense + BM25 retrieval over label sections
+│ └── services/
+│   ├── drug_lookup.py              # ingredient-identity matching over the drug CSV
+│   ├── ner_service.py              # medication extraction (rules + optional SciSpaCy)
+│   ├── ocr_service.py              # Tesseract + EasyOCR hybrid
+│   ├── llm_service.py              # grounded answer generation
+│   ├── safety_service.py           # emergency detection + disclaimers
+│   ├── chat_engine.py              # orchestration, intent, off-topic guard
+│   ├── conversation_memory.py      # per-session history
+│   └── rag_service.py              # compatibility shim (SQLite RAG removed)
+│
+├── mediassist-frontend/            # React 19 + Vite single-page app
+│ └── src/App.jsx                   # Lookup / Chat / Prescription views
 │
 ├── data/
-│ ├── raw/
+│ ├── raw/                          # openFDA, DrugBank, MedDRA sources (gitignored, ~11 GB)
 │ ├── processed/
-│ ├── medicine_list.csv
-│ └── sample_prescriptions/
+│ │ └── drug_knowledge_bot_ready_clean.csv   # canonical dataset — 3,881 drugs
+│ └── faiss_index/                  # generated on startup (gitignored)
 │
-├── notebooks/
-│ ├── 01_OCR_testing.ipynb
-│ ├── 02_Medicine_Extraction.ipynb
-│ └── 03_AI_Advice_Testing.ipynb
+├── scripts/
+│ ├── evaluate_pipeline.py          # 12-component scoring harness → HTML/JSON/MD
+│ ├── add_missing_essential_drugs.py# backfills WHO-essential drugs from openFDA
+│ └── …                             # dataset build and validation utilities
 │
-├── mediassist/
-│ ├── init.py
-│ ├── ocr_module.py
-│ ├── medicine_extractor.py
-│ ├── ai_advice.py
-│ ├── chat_interface.py
-│ ├── utils.py
-│ └── config.py
-│
-├── webapp/
-│ ├── app.py
-│ ├── templates/
-│ └── static/
-│
-├── tests/
-│ ├── test_ocr.py
-│ ├── test_medicine_extractor.py
-│ └── test_ai_advice.py
-│
-└── scripts/
-├── run_ocr.py
-├── run_extraction.py
-└── run_chat.py
+├── tests/                          # 99 tests: unit, integration, ocr
+└── reports/                        # generated evaluation reports
 ```
 
 ---
@@ -150,15 +150,37 @@ git clone https://github.com/YasiruChamithLansakara/MediAssist-Bot.git
 cd MediAssistBot
 ```
 
-### 2️⃣ Create Virtual Environment
+### 2️⃣ Set Up the Environment
+
+**Linux / macOS** — one command builds `.venv/` and verifies every component:
 ```bash
-python -m venv venv
-source venv/bin/activate     # On Windows: venv\Scripts\activate
+./setup_linux.sh
+./setup_linux.sh --check     # re-verify an existing environment
 ```
 
-### 3️⃣ Install Requirements
+**Windows**
 ```bash
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
+pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+pip install -r requirements-rag.txt -r requirements-llm.txt
+```
+
+> Install CPU-only PyTorch first. The default wheel pulls ~3 GB of CUDA
+> libraries that this project never uses — EasyOCR runs with `gpu=False` and
+> the embedding model runs on CPU.
+
+Tesseract is a system package, not a pip package:
+```bash
+sudo apt install tesseract-ocr      # Debian/Ubuntu
+brew install tesseract              # macOS
+```
+Without it the OCR pipeline still runs on EasyOCR alone.
+
+### 3️⃣ Configure
+```bash
+cp .env.example .env       # then add LLM_API_KEY (free key: https://console.groq.com)
 ```
 
 ---
@@ -203,27 +225,66 @@ pip install -r requirements.txt
 
 ## 🛠️ Tools & Technologies
 
-- **Programming:** Python, NumPy, Pandas, matplotlib, seaborn, scikit-learn 
-- **OCR:** DeepseekOCR  
-- **NLP / Transformers:** BioBERT  
-- **Vector Database:** FAISS  
-- **Knowledge Retrieval:** RAG (Retrieval-Augmented Generation)  
-- **Backend:** FastAPI  
-- **UI:** Streamlit  
+- **Programming:** Python 3.11+, NumPy, Pandas, scikit-learn
+- **OCR:** Tesseract (binarised path) + EasyOCR (grayscale path), best candidate chosen by medication-signal score
+- **Medication extraction:** rule-based n-grams validated against the drug knowledge base, with optional SciSpaCy `en_core_sci_sm`
+- **Drug matching:** RapidFuzz with a salt-normalising ingredient-identity layer
+- **Retrieval:** FAISS (`IndexFlatIP`, cosine) + BM25, fused with Reciprocal Rank Fusion, over section-level label chunks
+- **Embeddings:** `all-MiniLM-L6-v2` locally, with OpenAI and TF-IDF fallbacks
+- **LLM:** Groq `openai/gpt-oss-20b` (free tier), with a model-rotation chain
+- **Backend:** FastAPI + Uvicorn
+- **UI:** React 19 + Vite
+
+> The original proposal named DeepseekOCR, BioBERT and Streamlit. Each was
+> replaced during implementation — Tesseract/EasyOCR run without a GPU, the
+> lookup-validated extractor measured better than transformer NER on this
+> dataset, and the chat UI needed finer control than Streamlit allows.
 
 ---
 
 ## 🧪 Example Usage
 ```bash
-# Run OCR on a prescription
-python scripts/run_ocr.py
+# Start the API (http://127.0.0.1:8000, docs at /docs)
+uvicorn app.main:app --reload
 
-# Extract medicines from text
-python scripts/run_extraction.py
+# Start the web UI (http://localhost:5173)
+cd mediassist-frontend && npm install && npm run dev
 
-# Launch the chat interface
-streamlit run webapp/app.py
+# Run the test suite
+pytest -q
+
+# Score every pipeline component → reports/evaluation_report.html
+python scripts/evaluate_pipeline.py
+
+# Check the drug knowledge base for missing essential medicines
+python scripts/add_missing_essential_drugs.py --dry-run
 ```
+
+The vector index builds on first startup (~1 minute for 3,881 drugs) and is
+cached in `data/faiss_index/`. It rebuilds automatically when the drug CSV
+changes; delete the directory to force a rebuild.
+
+---
+
+## 📈 Current Evaluation
+
+`python scripts/evaluate_pipeline.py`, 2026-09-09 — **overall 96.4%**
+
+| Component | Score | Notes |
+|---|---|---|
+| Dataset quality | 99.9% | 3,881 drugs, 40/40 WHO-essential medicines for the six conditions |
+| Drug lookup | 95.0% | ingredient-identity matching, 0.5 ms average |
+| Medication extraction (NER) | 100.0% F1 | precision 100 / recall 100 over 15 prescription cases |
+| Safety layer | 100.0% | emergency recall 100%, no false alarms on label questions |
+| OCR pipeline | 100.0% | text-analysis hit rate |
+| Hybrid retrieval | 86.7% | 30 queries: concept, exact-name and section-targeted |
+| LLM answers | 100.0% grounding | answers only from retrieved evidence; refuses otherwise |
+| Automated tests | 100.0% | 99/99 passing |
+
+Scores are computed by `scripts/evaluate_pipeline.py` and written to
+`reports/`. Retrieval and extraction sets are deliberately larger than the
+number of cases needed to pass — a metric measured on five items cannot
+distinguish a working component from a broken one.
 
 ---
 

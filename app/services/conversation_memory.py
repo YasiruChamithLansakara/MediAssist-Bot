@@ -24,9 +24,41 @@ DB_PATH = os.getenv("CONVERSATION_DB", "conversations.db")
 USE_PERSISTENCE = os.getenv("USE_CONVERSATION_PERSISTENCE", "0").strip() == "1"
 
 
+def _summarise_turn_data(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Keep only what a later turn needs, never the clinical text.
+
+    The chat guard needs to know a drug was established; the LLM re-retrieves
+    everything else. Storing the full response meant a 40-turn session held
+    tens of thousands of characters of label text in memory.
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    drugs: List[str] = []
+    for match in data.get("matched_drugs", []) or []:
+        best = match.get("best_match") or {}
+        name = str(best.get("generic_name_clean") or best.get("generic_name") or "").strip()
+        if name and name not in drugs:
+            drugs.append(name)
+
+    summary: Dict[str, Any] = {}
+    if drugs:
+        summary["drugs"] = drugs[:8]
+    for key in ("intent", "answer_source", "is_emergency"):
+        if key in data:
+            summary[key] = data[key]
+    return summary
+
+
 class ConversationMemory:
     """
     Manages conversation history for chat sessions.
+
+    In-memory by design. Chat turns are health-adjacent, so the deployed
+    configuration keeps them in the process only, expires them on a timer and
+    never writes them to disk — which is what lets the project's own privacy
+    claim ("no patient-identifiable data stored") actually hold.
     """
 
     def __init__(self, use_persistence: bool = USE_PERSISTENCE, db_path: str = DB_PATH):
@@ -34,10 +66,23 @@ class ConversationMemory:
         self.db_path = db_path
         self._memory: Dict[str, List[Dict[str, Any]]] = {}
         self._lock = threading.Lock()
-        self._max_turns_per_session = 100
-        self._session_timeout_hours = 24
+        self._max_turns_per_session = int(os.getenv("MEMORY_MAX_TURNS", "40"))
+        self._session_timeout_hours = float(os.getenv("MEMORY_TTL_HOURS", "2"))
+        # Hard ceiling on concurrent sessions. Without it, a crawler hitting
+        # /api/chat with a fresh session id each time grows this dict until
+        # the container is OOM-killed.
+        self._max_sessions = int(os.getenv("MEMORY_MAX_SESSIONS", "500"))
+        self._last_seen: Dict[str, float] = {}
 
         if self.use_persistence:
+            import logging
+            logging.getLogger("mediassist.memory").warning(
+                "USE_CONVERSATION_PERSISTENCE=1 — chat turns will be written to "
+                "%s in plaintext. These are health-adjacent records: encrypt the "
+                "volume, set a retention policy, and update the privacy notice, "
+                "or leave persistence off (the default).",
+                self.db_path,
+            )
             self._init_db()
 
     def _init_db(self) -> None:
@@ -92,14 +137,24 @@ class ConversationMemory:
             The added turn record
         """
         with self._lock:
+            self._expire_locked()
+
             if session_id not in self._memory:
+                self._evict_if_full_locked()
                 self._memory[session_id] = []
+
+            self._last_seen[session_id] = time.time()
 
             turn = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "role": role,
                 "text": text,
-                "data": data or {},
+                # Only the small, non-clinical parts of the response are kept.
+                # This used to store the entire payload — every matched drug
+                # with its full warnings and dosage text — which grew without
+                # bound and put clinical content in a store that exists only
+                # to remember what was said.
+                "data": _summarise_turn_data(data),
                 "context": {"disease": disease, "age": age},
             }
 
@@ -119,6 +174,41 @@ class ConversationMemory:
                 self._persist_session(session_id)
 
             return turn
+
+    # ── retention ────────────────────────────────────────────────────────
+    # Both helpers assume the caller already holds self._lock.
+
+    def _expire_locked(self) -> int:
+        """Drop sessions untouched for longer than the TTL."""
+        if self._session_timeout_hours <= 0:
+            return 0
+        cutoff = time.time() - (self._session_timeout_hours * 3600.0)
+        stale = [s for s, seen in self._last_seen.items() if seen < cutoff]
+        for session_id in stale:
+            self._memory.pop(session_id, None)
+            self._last_seen.pop(session_id, None)
+        return len(stale)
+
+    def _evict_if_full_locked(self) -> None:
+        """Make room for a new session by dropping the least recently used."""
+        overflow = len(self._memory) - self._max_sessions + 1
+        if overflow <= 0:
+            return
+        oldest = sorted(self._last_seen.items(), key=lambda kv: kv[1])[:overflow]
+        for session_id, _seen in oldest:
+            self._memory.pop(session_id, None)
+            self._last_seen.pop(session_id, None)
+
+    def purge_expired(self) -> int:
+        """Public sweep, for a background task or an admin endpoint."""
+        with self._lock:
+            return self._expire_locked()
+
+    def forget(self, session_id: str) -> bool:
+        """Delete one session immediately — the 'clear my chat' path."""
+        with self._lock:
+            self._last_seen.pop(session_id, None)
+            return self._memory.pop(session_id, None) is not None
 
     def get_history(self, session_id: str, max_turns: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -273,10 +363,18 @@ class ConversationMemory:
     def stats(self) -> Dict[str, Any]:
         """Get statistics about conversation memory."""
         with self._lock:
+            expired = self._expire_locked()
             total_turns = sum(len(h) for h in self._memory.values())
             return {
                 "active_sessions": len(self._memory),
                 "total_turns": total_turns,
+                "expired_last_sweep": expired,
+                "retention": {
+                    "ttl_hours": self._session_timeout_hours,
+                    "max_turns_per_session": self._max_turns_per_session,
+                    "max_sessions": self._max_sessions,
+                    "stored_on_disk": self.use_persistence,
+                },
                 "persistence_enabled": self.use_persistence,
                 "db_path": self.db_path if self.use_persistence else None,
             }

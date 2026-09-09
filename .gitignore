@@ -132,3 +132,7 @@ validation_report.json
 reports/*.json
 reports/*.html
 reports/*.md
+
+# Deployment secrets — real values, never committed
+.env.docker
+!.env.docker.example

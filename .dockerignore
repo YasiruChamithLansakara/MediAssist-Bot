@@ -1,0 +1,34 @@
+# Build context hygiene — data/raw alone is ~11 GB and must never be sent
+# to the Docker daemon.
+data/raw/
+data/faiss_index/
+data/quality_reports/
+data/tmp/
+data/test_images/
+data/sample_prescriptions/
+data/processed/*.bak
+data/processed/*.pre-clean
+data/processed/drug_knowledge_enriched.csv
+
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+htmlcov/
+.coverage
+
+mediassist-frontend/node_modules/
+mediassist-frontend/dist/
+node_modules/
+
+.git/
+.github/
+.claude/
+reports/
+*.md
+!README.md
+.env
+.env.docker
+*.db

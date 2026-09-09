@@ -12,6 +12,7 @@ import os
 import time
 import uuid
 import logging
+from pathlib import Path as FilePath
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -53,11 +54,19 @@ from app.services.llm_service import (
     get_llm_service,
     is_llm_available,
     generate_llm_response,
+    get_llm_status,
     get_rag_status,
 )
 # SQLite RAG removed — semantic search is FAISS-only (app/ml/faiss_store.py)
 from app.services.ner_service import ner_status
+from app.services.interaction_service import check_interactions, interaction_status
 from app.ml.faiss_store import get_faiss_store
+from app.security import (
+    AccessCodeMiddleware,
+    ACCESS_HEADER,
+    access_control_enabled,
+    verify_startup_configuration,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -200,6 +209,9 @@ class SimpleRateLimitMiddleware(BaseHTTPMiddleware):
 # -----------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 0. Refuse to start an unprotected production deployment.
+    verify_startup_configuration()
+
     # 1. Drug lookup store (CSV → in-memory index)
     init_store()
     logger.info("Drug lookup store initialized")
@@ -240,17 +252,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MediAssist API", version="0.3.0", lifespan=lifespan)
 
-# middleware order
+# Middleware order matters. Starlette runs these in reverse registration
+# order, so the last one added is outermost: CORS wraps everything (a rejected
+# request still needs CORS headers or the browser reports an opaque failure),
+# then the access gate, then rate limiting, then request-id logging.
 app.add_middleware(RequestContextMiddleware)
 if RATE_LIMIT_ENABLED:
     app.add_middleware(SimpleRateLimitMiddleware, rpm=RATE_LIMIT_RPM, burst=RATE_LIMIT_BURST)
+
+app.add_middleware(AccessCodeMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["*", ACCESS_HEADER],
 )
 
 
@@ -308,6 +325,16 @@ def health_root():
     return {"status": "ok"}
 
 
+@api.get("/config")
+def public_config():
+    """
+    The only thing an unauthenticated client may know: whether a code is
+    needed. Deliberately carries no configuration, versions or model names —
+    everything else lives behind the gate in /api/meta.
+    """
+    return {"access_required": access_control_enabled(), "access_header": ACCESS_HEADER}
+
+
 @api.get("/meta")
 def meta():
     return {
@@ -319,6 +346,8 @@ def meta():
         "ocr_runtime": ocr_runtime_status(),
         "ner": ner_status(),
         "faiss": get_faiss_store().status(),
+        "llm": get_llm_status(),
+        "interactions": interaction_status(),
     }
 
 
@@ -334,6 +363,7 @@ def dashboard(request: Request):
         "activity": get_activity_snapshot(),
         "meta": meta(),
         "llm_available": is_llm_available(),
+        "llm": get_llm_status(),
         "rag_status": get_rag_status(),
         "ocr_runtime": ocr_runtime_status(),
         "ner": ner_status(),
@@ -438,6 +468,10 @@ def chat(request: Request, payload: ChatRequest):
         age=int(payload.age),
         drugs=drugs_in,
         request_id=rid,
+        # The topic guard needs this: a follow-up like "can I take it with
+        # food?" names no drug and carries no keyword, and was rejected as
+        # off-topic without the preceding turns.
+        conversation_history=conversation_history,
     )
     
     # Try to enhance with LLM if available. Honor LLM_ALWAYS_ON to call LLM even when no matched drugs.
@@ -625,6 +659,80 @@ def get_chat_history(request: Request, session_id: str = Path(..., min_length=1)
     }
 
 
+class InteractionRequest(BaseModel):
+    drugs: list[str] = Field(..., min_length=1, max_length=20,
+                             description="Medicine names to check against each other")
+    disease: Optional[str] = Field(None, description="Optional disease context")
+
+
+@api.post("/interactions")
+def interactions(request: Request, payload: InteractionRequest):
+    """
+    Check a list of medicines against each other.
+
+    Returns documented interactions with mechanism, patient-facing advice and
+    a source for each. A `count` of 0 means nothing was found in the curated
+    table — never that a combination is safe; the response carries a
+    disclaimer saying so.
+    """
+    names = [str(d).strip() for d in payload.drugs if str(d).strip()]
+    if len(names) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "not_enough_drugs",
+                "message": "Provide at least two medicines to check against each other.",
+            },
+        )
+
+    # Resolve through the drug index first so brand names, salt forms and
+    # misspellings are checked as their base ingredient.
+    resolved: list[Any] = []
+    unresolved: list[str] = []
+    for name in names:
+        result = lookup_drug(name, disease=payload.disease or "", age=40, top_k=1)
+        best = result.get("best_match")
+        if best and not result.get("needs_confirmation"):
+            resolved.append(best)
+        else:
+            resolved.append(name)
+            if not best:
+                unresolved.append(name)
+
+    report = check_interactions(resolved, disease=payload.disease or "")
+    report["unrecognised_drugs"] = unresolved
+
+    record_activity(
+        "interactions",
+        success=True,
+        status_code=200,
+        detail=f"{report['count']} interaction(s)",
+        context={"drugs": names, "count": report["count"]},
+    )
+    rid = getattr(request.state, "request_id", "")
+    if rid:
+        report["request_id"] = rid
+    return report
+
+
+@api.post("/chat/forget")
+def forget_chat(request: Request, payload: dict):
+    """
+    Delete one conversation immediately.
+
+    Backs the UI's "clear chat" control. Without it the only way a user could
+    remove their messages was to wait out the retention window.
+    """
+    session_id = str((payload or {}).get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "missing_session_id", "message": "session_id is required."},
+        )
+    removed = get_conversation_memory().forget(session_id)
+    return {"session_id": session_id, "forgotten": removed}
+
+
 # CONVERSATION MEMORY: GET /api/memory/stats
 # Returns conversation memory statistics
 @api.get("/memory/stats")
@@ -699,3 +807,52 @@ def rag_search(
 
 
 app.include_router(api)
+
+
+# -----------------------------------------------------------------------------
+# STATIC FRONTEND (production container only)
+# -----------------------------------------------------------------------------
+# When the built SPA is present, serve it from the same origin as the API.
+# That removes CORS from the deployment entirely — the browser only ever talks
+# to one host — and makes the whole app a single container to run.
+#
+# Mounted last so every /api route above still wins. Unknown paths fall
+# through to index.html because the SPA does its own routing.
+# NOTE: `Path` here would be fastapi's path-parameter helper, which is already
+# imported above — the filesystem one is aliased as FilePath.
+_FRONTEND_DIST = FilePath(os.getenv(
+    "FRONTEND_DIST",
+    str(FilePath(__file__).resolve().parents[1] / "mediassist-frontend" / "dist"),
+))
+
+if _FRONTEND_DIST.is_dir() and (_FRONTEND_DIST / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_FRONTEND_DIST / "assets")),
+        name="assets",
+    )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        # Never let a mistyped /api/... path silently return the HTML shell —
+        # that turns a 404 into a confusing JSON parse error in the client.
+        if full_path.startswith("api/"):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"No such endpoint: /{full_path}"},
+            )
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")
+
+    logger.info("Serving frontend from %s", _FRONTEND_DIST)
+else:
+    logger.info(
+        "No built frontend at %s — running API only (this is normal in development, "
+        "where Vite serves the UI on port 5173).",
+        _FRONTEND_DIST,
+    )
