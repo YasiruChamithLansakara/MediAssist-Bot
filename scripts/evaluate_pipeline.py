@@ -229,6 +229,67 @@ NER_TEST_CASES = [
         "expected": ["ibuprofen"],
         "disease": "arthritis",
     },
+
+    # --- run-on sentences: conjunctions as segment boundaries -------------
+    # These are the cases that used to drop every drug after the first,
+    # because segmentation split only on newline, semicolon and comma.
+    {
+        "text": "Take Amlodipine 5mg in the morning and Atorvastatin 20mg at night.",
+        "expected": ["amlodipine", "atorvastatin"],
+        "disease": "heart disease",
+    },
+    {
+        "text": "Continue Metformin 1g BD and Sitagliptin 100mg OD and Aspirin 75mg OD.",
+        "expected": ["metformin", "sitagliptin", "aspirin"],
+        "disease": "diabetes",
+    },
+    {
+        "text": "Losartan 50mg daily + Hydrochlorothiazide 12.5mg daily",
+        "expected": ["losartan", "hydrochlorothiazide"],
+        "disease": "hypertension",
+    },
+    {
+        "text": "Start Warfarin 3mg nocte then review INR in 5 days",
+        "expected": ["warfarin"],
+        "disease": "heart disease",
+    },
+
+    # --- salt forms: the name on the box vs the name in the label ---------
+    {
+        "text": "Metoprolol 50mg BD for rate control",
+        "expected": ["metoprolol"],
+        "disease": "heart disease",
+    },
+    {
+        "text": "Inj. Enalapril 5mg OD; Spironolactone 25mg OD",
+        "expected": ["enalapril", "spironolactone"],
+        "disease": "heart disease",
+    },
+
+    # --- prescription shorthand -------------------------------------------
+    {
+        "text": "T. Propranolol 40mg BD for migraine prophylaxis",
+        "expected": ["propranolol"],
+        "disease": "migraine",
+    },
+    {
+        "text": "Cap. Omeprazole 20mg OD before breakfast, T. Naproxen 500mg BD after food",
+        "expected": ["omeprazole", "naproxen"],
+        "disease": "arthritis",
+    },
+    {
+        "text": "Syr. Salbutamol 2.5mg TDS and Montelukast 10mg nocte",
+        "expected": ["albuterol", "montelukast"],
+        "disease": "asthma",
+    },
+
+    # --- negative control: no drugs at all --------------------------------
+    # Anything extracted here is a false positive by construction.
+    {
+        "text": "Patient reports feeling much better since the last visit. Review in 3 months.",
+        "expected": [],
+        "disease": "diabetes",
+    },
 ]
 
 def eval_ner() -> Dict[str, Any]:
@@ -673,12 +734,47 @@ def eval_ocr() -> Dict[str, Any]:
 # 6. FAISS — SEMANTIC SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Retrieval cases, grouped by the kind of query a patient actually types.
+# Five cases gave a hit rate whose 95% confidence interval spanned roughly
+# 5–85% — wide enough that it could not tell a working index from a broken
+# one. Thirty narrows that to something a reader can act on, and splitting by
+# query type shows WHERE retrieval fails rather than only that it does.
 FAISS_TESTS = [
-    ("diabetes medication blood sugar",   ["metformin", "insulin", "glipizide"]),
-    ("blood pressure hypertension",       ["lisinopril", "amlodipine", "losartan"]),
-    ("asthma inhaler breathing",          ["albuterol", "fluticasone", "salbutamol"]),
-    ("pain relief anti-inflammatory",     ["ibuprofen", "aspirin", "naproxen"]),
-    ("cholesterol statin heart disease",  ["atorvastatin", "simvastatin", "rosuvastatin"]),
+    # --- concept queries: no drug named, the condition described -----------
+    ("diabetes medication blood sugar",      ["metformin", "insulin", "glipizide", "glyburide", "sitagliptin"]),
+    ("blood pressure hypertension",          ["lisinopril", "amlodipine", "losartan", "valsartan", "atenolol", "metoprolol", "labetalol", "enalapril", "ramipril"]),
+    ("asthma inhaler breathing",             ["albuterol", "fluticasone", "salbutamol", "budesonide", "ipratropium", "montelukast"]),
+    ("pain relief anti-inflammatory",        ["ibuprofen", "aspirin", "naproxen", "diclofenac", "meloxicam", "celecoxib"]),
+    ("cholesterol statin heart disease",     ["atorvastatin", "simvastatin", "rosuvastatin", "pravastatin", "lovastatin"]),
+    ("medicine to thin the blood",           ["warfarin", "clopidogrel", "aspirin", "heparin", "apixaban"]),
+    ("water tablet for swelling",            ["furosemide", "hydrochlorothiazide", "chlorthalidone", "spironolactone"]),
+    ("migraine headache treatment",          ["sumatriptan", "propranolol", "topiramate", "amitriptyline", "rizatriptan"]),
+    ("drug for joint inflammation arthritis", ["methotrexate", "prednisolone", "naproxen", "hydroxychloroquine", "meloxicam", "diclofenac"]),
+    ("lower heart rate beta blocker",        ["metoprolol", "atenolol", "propranolol", "bisoprolol", "labetalol"]),
+
+    # --- exact drug names: the lexical half of hybrid search ---------------
+    ("metformin",        ["metformin"]),
+    ("lisinopril",       ["lisinopril"]),
+    ("atorvastatin",     ["atorvastatin"]),
+    ("amlodipine",       ["amlodipine"]),
+    ("warfarin",         ["warfarin"]),
+    ("albuterol",        ["albuterol"]),
+    ("spironolactone",   ["spironolactone"]),
+    ("sumatriptan",      ["sumatriptan"]),
+    ("omeprazole",       ["omeprazole"]),
+    ("losartan",         ["losartan"]),
+
+    # --- section-targeted: the reason chunks are indexed per section -------
+    ("warnings for warfarin bleeding",           ["warfarin"]),
+    ("metformin lactic acidosis warning",        ["metformin"]),
+    ("how much atorvastatin should be taken",    ["atorvastatin"]),
+    ("lisinopril dry cough side effect",         ["lisinopril"]),
+    ("who should not take spironolactone",       ["spironolactone"]),
+    ("albuterol inhaler dosage instructions",    ["albuterol"]),
+    ("contraindications of warfarin pregnancy",  ["warfarin"]),
+    ("amlodipine swelling ankles",               ["amlodipine"]),
+    ("aspirin stomach ulcer risk",               ["aspirin"]),
+    ("propranolol asthma caution",               ["propranolol"]),
 ]
 
 def eval_faiss() -> Dict[str, Any]:
@@ -758,18 +854,82 @@ def eval_faiss() -> Dict[str, Any]:
 # 6. LLM — RESPONSE QUALITY
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Each case runs through the REAL retrieval path — NER, drug lookup and
+# hybrid search — not against an empty context.
+#
+# The previous version called the LLM with matched_drugs=[] and then checked
+# whether the answer mentioned the drug. Since the system prompt correctly
+# instructs the model to say "I don't have enough data on this" when no drug
+# data is supplied, a properly grounded model FAILED that test while a
+# hallucinating one passed it. The metric rewarded exactly the behaviour this
+# project must avoid.
+#
+# `grounded: False` marks cases where refusing IS the correct answer.
 LLM_TESTS = [
     {
         "message": "What are the common side effects of metformin?",
-        "disease": "diabetes", "age": 55,
-        "checks": ["side effect", "nausea", "diarrhea", "consult"],
+        "disease": "diabetes", "age": 55, "intent": "side_effects",
+        "checks": ["metformin", "consult"],
+        "grounded": True,
     },
     {
         "message": "Is lisinopril safe for elderly patients?",
-        "disease": "hypertension", "age": 72,
-        "checks": ["lisinopril", "blood pressure", "doctor", "pharmacist"],
+        "disease": "hypertension", "age": 72, "intent": "safety",
+        "checks": ["lisinopril", "doctor", "pharmacist"],
+        "grounded": True,
+    },
+    {
+        "message": "What is warfarin used for and what should I watch out for?",
+        "disease": "heart disease", "age": 68, "intent": "general",
+        "checks": ["warfarin", "bleed"],
+        "grounded": True,
+    },
+    {
+        "message": "How should I take my amlodipine?",
+        "disease": "hypertension", "age": 60, "intent": "dosage",
+        "checks": ["amlodipine", "doctor"],
+        "grounded": True,
+    },
+    {
+        "message": "Tell me about zynophrenidol tablets",   # not a real drug
+        "disease": "diabetes", "age": 45, "intent": "general",
+        "checks": [],
+        "grounded": False,   # must NOT invent an answer
     },
 ]
+
+# Phrases that show the model declined to answer without evidence.
+#
+# Every marker must be a full clause. Loose fragments like "not in" and
+# "not available" matched ordinary sentences ("reduces clot risk in people
+# not in atrial fibrillation") and scored good grounded answers as refusals.
+_REFUSAL_MARKERS = (
+    "don't have enough data",
+    "do not have enough data",
+    "i don't have information",
+    "i do not have information",
+    "no information on",
+    "cannot find any information",
+    "can't find any information",
+    "unable to find information",
+    "not in the knowledge base",
+    "not in my database",
+)
+
+
+def _normalise_quotes(text: str) -> str:
+    """
+    Fold Unicode punctuation to ASCII before matching.
+
+    The model writes "I don't" with U+2019, so an ASCII-apostrophe marker
+    silently failed to match a refusal that was plainly there.
+    """
+    return (
+        (text or "")
+        .replace("’", "'").replace("‘", "'")
+        .replace("“", '"').replace("”", '"')
+        .replace("–", "-").replace("—", "-")
+    )
 
 def eval_llm(skip: bool = False) -> Dict[str, Any]:
     print("\n[7/8] LLM response quality …")
@@ -789,44 +949,90 @@ def eval_llm(skip: bool = False) -> Dict[str, Any]:
         cases: List[Dict[str, Any]] = []
         check_total = checks_passed = 0
 
+        from app.services.chat_engine import build_chat_response
+        import app.services.drug_lookup as _dl
+        _dl.init_store()
+
+        grounding_total = grounding_ok = 0
+
         for tc in LLM_TESTS:
             t1 = time.time()
+
+            # Retrieve through the real pipeline so the LLM is judged on the
+            # context the running system would actually give it.
+            chat = build_chat_response(
+                message=tc["message"],
+                disease=tc["disease"],
+                age=tc["age"],
+                drugs=[],
+                request_id="eval",
+            )
+            matched = [m for m in chat.get("matched_drugs", []) if m.get("best_match")]
+
             answer = svc.generate_response(
                 message=tc["message"],
                 disease=tc["disease"],
                 age=tc["age"],
-                matched_drugs=[],
+                matched_drugs=matched,
                 conversation_history=[],
-                intent="side_effects",
+                intent=tc.get("intent", "general"),
             ) or ""
             lat = round((time.time() - t1) * 1000)
 
-            answer_lower = answer.lower()
+            answer_lower = _normalise_quotes(answer).lower()
             passed_checks = [kw for kw in tc["checks"] if kw in answer_lower]
             check_total  += len(tc["checks"])
             checks_passed += len(passed_checks)
             has_disclaimer = any(w in answer_lower for w in
                                  ["consult", "pharmacist", "doctor", "not medical"])
 
+            # Grounding: answer when there is evidence, refuse when there is not.
+            #
+            # A refusal marker inside a long, substantive answer is not a
+            # refusal — it is the model correctly declining ONE bullet ("common
+            # side effects: I don't have enough data") while answering the
+            # rest. Only a short answer that is essentially just the marker
+            # counts as declining the question.
+            has_marker = any(marker in answer_lower for marker in _REFUSAL_MARKERS)
+            refused = has_marker and len(answer.strip()) < 400
+            expects_answer = tc.get("grounded", True)
+            grounded_ok = (bool(matched) and not refused) if expects_answer else refused
+            grounding_total += 1
+            grounding_ok += bool(grounded_ok)
+
             cases.append({
                 "question": tc["message"],
                 "disease": tc["disease"],
                 "age": tc["age"],
                 "latency_ms": lat,
+                "retrieved_drugs": [
+                    (m.get("best_match") or {}).get("generic_name_clean") for m in matched
+                ],
                 "checks_passed": f"{len(passed_checks)}/{len(tc['checks'])}",
                 "missing_checks": [k for k in tc["checks"] if k not in answer_lower],
                 "has_disclaimer": has_disclaimer,
+                "expects_answer": expects_answer,
+                "refused": refused,
+                "grounding_ok": bool(grounded_ok),
                 "answer_excerpt": answer[:300].replace("\n", " "),
             })
 
         kw_score = _pct(checks_passed, check_total)
         disc_score = _pct(sum(1 for c in cases if c["has_disclaimer"]), len(cases))
-        overall = round((kw_score + disc_score) / 2, 1)
+        ground_score = _pct(grounding_ok, grounding_total)
+        # Grounding carries the most weight: for a medical tool, answering only
+        # from retrieved evidence matters more than hitting expected keywords.
+        overall = round((kw_score + disc_score + 2 * ground_score) / 4, 1)
 
-        print(f"    OK Keyword score {kw_score}%  Disclaimer {disc_score}%")
+        print(
+            f"    OK Keyword {kw_score}%  Disclaimer {disc_score}%  "
+            f"Grounding {ground_score}%"
+        )
         return {
             "keyword_score_pct": kw_score,
             "disclaimer_rate_pct": disc_score,
+            "grounding_score_pct": ground_score,
+            "model": svc.status().get("model"),
             "overall_score_pct": overall,
             "cases": cases,
             "elapsed_s": round(time.time() - t0, 2),

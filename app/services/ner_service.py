@@ -184,9 +184,30 @@ def _scispacy_entities(text: str) -> Dict[str, List[str]]:
 
 # ── Rule-based candidate extraction ──────────────────────────────────────
 
+# Segment boundaries inside a prescription line.
+#
+# Splitting on newline/semicolon/comma alone was not enough: a run-on
+# sentence such as
+#     "Patient takes Metformin 500mg twice daily and Lisinopril 10mg once daily"
+# was one segment, and only the FIRST drug survived candidate generation —
+# the second medicine was silently dropped. "and", "&", "+" and "then" are
+# added as boundaries.
+#
+# "with" is deliberately NOT a boundary: "take with food" is a frequency
+# phrase that FREQUENCY_RE needs to see intact.
+_SEGMENT_SPLIT_RE = re.compile(
+    r"[\n;,]"
+    r"|(?:\s+-\s+)"
+    r"|\s+\band\b\s+"
+    r"|\s*[&+]\s*"
+    r"|\s+\bthen\b\s+",
+    re.IGNORECASE,
+)
+
+
 def _split_segments(text: str) -> List[str]:
-    """Split prescription text into segments by newline, semicolon, comma, or dash."""
-    raw = re.split(r"[\n;,]|(?:\s+-\s+)", text or "")
+    """Split prescription text into segments on punctuation and conjunctions."""
+    raw = _SEGMENT_SPLIT_RE.split(text or "")
     segments = [re.sub(r"\s+", " ", x).strip() for x in raw if x and x.strip()]
     return segments[:80]
 

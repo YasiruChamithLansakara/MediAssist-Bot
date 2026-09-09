@@ -3,16 +3,29 @@ LLM Integration Service — MediAssist
 =====================================
 Provides natural-language answers grounded in the drug knowledge base.
 
-Primary backend: Groq API  →  llama-3.1-8b-instant  (FREE, fast)
-Fallback 1:      Together AI → meta-llama/Llama-3.1-8B-Instruct-Turbo
-Fallback 2:      OpenAI GPT  (any model)
-Fallback 3:      HuggingFace Inference API
+Primary backend: Groq API  →  openai/gpt-oss-20b  (FREE, fast, 131k context)
+Alternative providers: Together AI, OpenAI, HuggingFace — each needs its OWN key.
+
+Model history (important)
+-------------------------
+`llama-3.1-8b-instant` was decommissioned by Groq on 2026-08-16. Requests to it
+now fail, and because the old code swallowed every generation error and returned
+None, the whole app silently degraded to rule-based answers with no visible
+signal. Two things guard against a repeat:
+
+  1. MODEL ROTATION — if the configured model is rejected as unknown or
+     decommissioned, the client rotates to the next model in GROQ_MODEL_CHAIN
+     and retries once, logging the switch at WARNING.
+  2. VISIBLE STATUS — `LLMService.status()` reports the active model and the
+     last error, and is surfaced through /api/meta and /api/dashboard, so a
+     dead model shows up in the UI instead of hiding.
 
 Environment variables
 ---------------------
 LLM_PROVIDER      groq | together | openai | huggingface   (default: groq)
 LLM_API_KEY       your API key for the chosen provider
 LLM_MODEL         override the default model name
+LLM_MODEL_CHAIN   comma-separated Groq models to try, in order
 LLM_TEMPERATURE   sampling temperature (default 0.3 — factual, low creativity)
 LLM_MAX_TOKENS    max response tokens (default 800)
 LLM_ALWAYS_ON     1 = call LLM even when no drugs matched (default 0)
@@ -58,12 +71,43 @@ LLM_MAX_TOKENS  = int(os.getenv("LLM_MAX_TOKENS", "800"))
 
 # Default model per provider
 _DEFAULT_MODELS: Dict[str, str] = {
-    "groq":        "llama-3.1-8b-instant",   # FREE — primary per project spec
-    "together":    "meta-llama/Llama-3.1-8B-Instruct-Turbo",
-    "openai":      "gpt-3.5-turbo",
-    "huggingface": "meta-llama/Llama-3.1-8B-Instruct",
+    "groq":        "openai/gpt-oss-20b",     # FREE — replaces decommissioned llama-3.1-8b-instant
+    "together":    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "openai":      "gpt-4o-mini",
+    "huggingface": "meta-llama/Llama-3.3-70B-Instruct",
 }
-LLM_MODEL = os.getenv("LLM_MODEL", _DEFAULT_MODELS.get(LLM_PROVIDER, "llama-3.1-8b-instant"))
+
+# Models retired by Groq. Configuring one of these is a hard error at startup
+# rather than a 400 on the first live request.
+_RETIRED_GROQ_MODELS = {
+    "llama-3.1-8b-instant",      # decommissioned 2026-08-16
+    "llama-3.1-70b-versatile",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+    "mixtral-8x7b-32768",
+    "gemma-7b-it",
+}
+
+# Tried in order when the active model is rejected. Verified live on GroqCloud.
+GROQ_MODEL_CHAIN: List[str] = [
+    m.strip()
+    for m in os.getenv(
+        "LLM_MODEL_CHAIN",
+        "openai/gpt-oss-20b,openai/gpt-oss-120b,qwen/qwen3.6-27b",
+    ).split(",")
+    if m.strip()
+]
+
+_configured_model = os.getenv("LLM_MODEL", "").strip()
+if _configured_model in _RETIRED_GROQ_MODELS:
+    logger.error(
+        "LLM_MODEL='%s' was decommissioned by the provider and no longer serves "
+        "requests. Falling back to '%s'. Update LLM_MODEL in your .env.",
+        _configured_model, _DEFAULT_MODELS["groq"],
+    )
+    _configured_model = ""
+
+LLM_MODEL = _configured_model or _DEFAULT_MODELS.get(LLM_PROVIDER, "openai/gpt-oss-20b")
 
 # ── PROMPTS ──────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are MediAssist, an educational AI assistant that helps chronic disease \
@@ -149,11 +193,15 @@ class _GroqClient:
         self.model = model
         self._client = None
         self._ready = False
+        self.last_error: Optional[str] = None
+        # Models still worth trying if `model` is rejected, in order.
+        self._chain: List[str] = [model] + [m for m in GROQ_MODEL_CHAIN if m != model]
         self._init()
 
     def _init(self):
         if not self.api_key:
             logger.warning("LLM_API_KEY not set — Groq LLM disabled")
+            self.last_error = "no_api_key"
             return
         try:
             from groq import Groq
@@ -175,42 +223,124 @@ class _GroqClient:
     def ready(self) -> bool:
         return self._ready
 
-    def generate(self, messages: List[Dict[str, str]]) -> Optional[str]:
-        if not self._ready:
-            return None
-        try:
-            # Prefer official groq SDK
-            if self._client is not None:
-                resp = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=LLM_TEMPERATURE,
-                    max_tokens=LLM_MAX_TOKENS,
-                )
-                return resp.choices[0].message.content.strip()
-            # Fallback: raw requests (OpenAI-compatible)
-            import requests, json  # noqa: E401
-            headers = {
+    @staticmethod
+    def _is_model_rejected(exc: Exception) -> bool:
+        """
+        True when the provider rejected the *model* rather than the request.
+
+        Groq answers a retired or unknown model with HTTP 404 and a body
+        containing `model_not_found` / "does not exist" / "decommissioned".
+        Those are worth retrying on a different model; a 401 or a rate limit
+        is not.
+        """
+        text = str(exc).lower()
+        markers = (
+            "model_not_found", "does not exist", "decommissioned",
+            "deprecated", "no longer supported", "unknown model",
+        )
+        return any(m in text for m in markers)
+
+    def _call_once(self, model: str, messages: List[Dict[str, str]]) -> str:
+        """One completion call against a specific model. Raises on failure."""
+        if self._client is not None:
+            resp = self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=LLM_TEMPERATURE,
+                max_tokens=LLM_MAX_TOKENS,
+            )
+            return resp.choices[0].message.content.strip()
+
+        # Fallback: raw requests (OpenAI-compatible endpoint)
+        import requests
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-            }
-            payload = {
-                "model": self.model,
+            },
+            json={
+                "model": model,
                 "messages": messages,
                 "temperature": LLM_TEMPERATURE,
                 "max_tokens": LLM_MAX_TOKENS,
-            }
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
-        except Exception as exc:
-            logger.error("Groq generation failed: %s", exc)
+            },
+            timeout=30,
+        )
+        if resp.status_code >= 400:
+            # Surface the body — it carries the model_not_found marker.
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:400]}")
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """
+        Rate limits, timeouts and 5xx are worth retrying; a bad key is not.
+
+        Two evaluation runs came back with empty answers even though retrieval
+        had succeeded — a transient provider failure with no retry, which the
+        caller then saw as "the LLM produced nothing".
+        """
+        text = str(exc).lower()
+        markers = (
+            "429", "rate limit", "rate_limit", "too many requests",
+            "500", "502", "503", "504", "overloaded", "capacity",
+            "timeout", "timed out", "connection", "temporarily",
+        )
+        return any(m in text for m in markers)
+
+    def _call_with_retry(self, model: str, messages: List[Dict[str, str]]) -> str:
+        """One model, up to three attempts, exponential backoff."""
+        import time
+
+        last: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                answer = self._call_once(model, messages)
+                # An empty completion is a failure, not an answer — returning
+                # it verbatim shows the user a blank reply.
+                if answer and answer.strip():
+                    return answer
+                last = RuntimeError("empty completion")
+            except Exception as exc:
+                last = exc
+                if not self._is_transient(exc):
+                    raise
+            if attempt < 2:
+                delay = 0.6 * (2 ** attempt)
+                logger.warning(
+                    "Groq call failed on '%s' (%s) — retrying in %.1fs",
+                    model, last, delay,
+                )
+                time.sleep(delay)
+        raise last or RuntimeError("generation failed")
+
+    def generate(self, messages: List[Dict[str, str]]) -> Optional[str]:
+        if not self._ready:
             return None
+
+        for model in self._chain:
+            try:
+                answer = self._call_with_retry(model, messages)
+                if model != self.model:
+                    logger.warning(
+                        "Groq model '%s' was rejected; now using '%s'. "
+                        "Update LLM_MODEL in your .env to make this permanent.",
+                        self.model, model,
+                    )
+                    self.model = model          # stick with what works
+                self.last_error = None
+                return answer
+            except Exception as exc:
+                if self._is_model_rejected(exc) and model != self._chain[-1]:
+                    logger.warning("Groq model '%s' rejected (%s) — trying next", model, exc)
+                    continue
+                logger.error("Groq generation failed on '%s': %s", model, exc)
+                self.last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                return None
+
+        self.last_error = "all_models_rejected"
+        return None
 
 
 class _TogetherClient:
@@ -346,6 +476,39 @@ class _HuggingFaceClient:
 # LLM SERVICE
 # ════════════════════════════════════════════════════════════════════════════
 
+def _side_effects_text(best: Dict[str, Any], limit: int = 400) -> str:
+    """
+    Pull side effects out of a lookup match.
+
+    `build_match()` returns them nested under `side_effects_buckets`
+    (common / less_common / rare / postmarketing / unknown), but this module
+    used to read a flat `common_side_effects` key that no match has ever
+    carried. The result: the model was told nothing about side effects even
+    when the dataset held them, and answered "I don't have enough data" to
+    the single most common question patients ask.
+    """
+    buckets = best.get("side_effects_buckets") or {}
+    if not isinstance(buckets, dict):
+        buckets = {}
+
+    parts: List[str] = []
+    for label in ("common", "less_common", "rare"):
+        value = str(buckets.get(label) or "").strip()
+        if value:
+            parts.append(f"{label.replace('_', ' ')}: {value}")
+
+    # Fall back to whatever flat columns exist on the row.
+    if not parts:
+        for column in ("common_side_effects", "top_all_side_effects", "side_effects_all"):
+            value = str(best.get(column) or "").strip()
+            if value:
+                parts.append(value)
+                break
+
+    text = " | ".join(parts)
+    return text[:limit] if text else ""
+
+
 class LLMService:
     """
     Orchestrates context building + response generation.
@@ -376,13 +539,20 @@ class LLMService:
         else:
             logger.warning("Unknown LLM_PROVIDER='%s'", provider)
 
-        # auto-fallback: try other providers with the same key
+        # Cross-provider fallback, but ONLY with a key that belongs to that
+        # provider. The previous version replayed LLM_API_KEY against every
+        # other vendor's endpoint, which sent a Groq key to Together, OpenAI
+        # and HuggingFace on each request — a credential leak that also could
+        # never have authenticated.
         for name, fallback_cls in mapping.items():
             if name == provider:
                 continue
-            b = fallback_cls(api_key, _DEFAULT_MODELS[name])
+            own_key = os.getenv(f"{name.upper()}_API_KEY", "").strip()
+            if not own_key:
+                continue
+            b = fallback_cls(own_key, _DEFAULT_MODELS[name])
             if b.ready:
-                logger.info("LLM: fell back to %s", name)
+                logger.info("LLM: fell back to %s (using %s_API_KEY)", name, name.upper())
                 return b
 
         logger.warning(
@@ -396,6 +566,25 @@ class LLMService:
 
     def is_available(self) -> bool:
         return self._backend is not None and self._backend.ready
+
+    def status(self) -> Dict[str, Any]:
+        """
+        Machine-readable LLM health, surfaced via /api/meta and /api/dashboard.
+
+        `last_error` is the reason the most recent generation failed. Without
+        it a decommissioned model looks identical to "no drugs matched" from
+        the outside — which is exactly how the llama-3.1 retirement went
+        unnoticed for three weeks.
+        """
+        backend = self._backend
+        return {
+            "available":  self.is_available(),
+            "provider":   self.provider,
+            "model":      getattr(backend, "model", None),
+            "configured_model": LLM_MODEL,
+            "model_chain": GROQ_MODEL_CHAIN if self.provider == "groq" else [],
+            "last_error": getattr(backend, "last_error", None),
+        }
 
     # ── context builder ──────────────────────────────────────────────────
 
@@ -428,7 +617,9 @@ class LLMService:
                 "contraindications": sections.get("contraindications") or best.get("contraindications"),
                 "dosage":            sections.get("dosage_and_administration") or best.get("dosage_and_administration"),
                 "indications":       sections.get("indications") or best.get("indications"),
-                "common_side_effects": best.get("common_side_effects"),
+                "common_side_effects": _side_effects_text(best),
+                # Flagged identity: the prompt must say so rather than assert.
+                "needs_confirmation": bool(match.get("needs_confirmation")),
                 "source": "matched",
             })
 
@@ -529,6 +720,12 @@ class LLMService:
                 name = drug.get("name", "Unknown")
                 conf = int((drug.get("confidence") or 0) * 100)
                 parts.append(f"\n► {name} (match confidence: {conf}%)")
+                if drug.get("needs_confirmation"):
+                    parts.append(
+                        "  NOTE: this drug was NOT matched exactly. Open your answer by "
+                        "telling the patient to confirm this is the medicine on their "
+                        "prescription before relying on anything below."
+                    )
                 if drug.get("drug_class"):
                     parts.append(f"  Class: {drug['drug_class']}")
                 if drug.get("indications"):
@@ -633,6 +830,11 @@ def get_llm_service() -> LLMService:
 
 def is_llm_available() -> bool:
     return get_llm_service().is_available()
+
+
+def get_llm_status() -> Dict[str, Any]:
+    """Active provider/model plus the last generation error, for /api/meta."""
+    return get_llm_service().status()
 
 
 def generate_llm_response(

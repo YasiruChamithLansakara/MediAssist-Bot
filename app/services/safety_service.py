@@ -18,7 +18,7 @@ EMERGENCY_SYMPTOMS = {
     "breathing": [
         "difficulty breathing", "shortness of breath", "can't breathe", "trouble breathing",
         "gasping", "wheezing", "breathing difficulty", "dyspnea", "respiratory distress",
-        "can not breathe", "unable to breathe"
+        "can not breathe", "cannot breathe", "unable to breathe", "struggling to breathe"
     ],
     "chest": [
         "chest pain", "chest pressure", "chest tightness", "heart pain", "cardiac pain",
@@ -26,7 +26,9 @@ EMERGENCY_SYMPTOMS = {
     ],
     "severe_allergy": [
         "anaphylaxis", "anaphylactic", "severe allergic reaction", "severe allergy",
-        "throat closing", "throat swelling", "tongue swelling", "severe itching",
+        "throat closing", "throat is closing", "throat closing up",
+        "throat swelling", "throat is swelling", "tongue swelling",
+        "tongue is swelling", "face is swelling", "severe itching",
         "severe hives", "severe rash", "histamine shock"
     ],
     "consciousness": [
@@ -88,9 +90,88 @@ SAFE_PATTERNS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# EMERGENCY CONTEXT FILTERS
+# ---------------------------------------------------------------------------
+# Plain substring matching turned every mention of a symptom into a red alert.
+# "What are the signs of a metformin overdose?" is a legitimate educational
+# question about a drug label, and answering it with "call 911 and stop
+# reading this app" is both wrong and erodes trust in the alerts that matter.
+#
+# Three contexts suppress the alert. They are checked against the words
+# immediately AROUND the matched symptom, not the whole message, so
+# "I had a seizure last year, and now I have chest pain" still fires.
+
+# Asking what a symptom means, rather than reporting it.
+_INFORMATIONAL_RE = re.compile(
+    r"\b(?:what (?:are|is|happens)|signs? of|symptoms? of|side ?effects? of|"
+    r"warning signs?|risk of|how (?:do|would) i know|"
+    # "can it cause", "can this medicine cause", "does warfarin cause"
+    r"(?:can|could|does|do|would|will|might)\b(?:\s+[\w'-]+){0,3}"
+    r"\s+(?:cause|causes|trigger|triggers|lead to|result in)|"
+    r"is .{0,25} a (?:sign|symptom)|"
+    r"tell me about|information (?:on|about)|read about|learn about)\b",
+    re.IGNORECASE,
+)
+
+# Clause boundaries. A past-tense marker in a NEIGHBOURING clause must not
+# suppress a symptom in the current one: in "I had a seizure last year, and
+# now I have chest pain" the chest pain is happening now.
+_CLAUSE_SPLIT_RE = re.compile(
+    r"[,;.!?]|\band now\b|\bbut\b|\bhowever\b|\bcurrently\b|\btoday\b",
+    re.IGNORECASE,
+)
+
+# The symptom is denied.
+_NEGATION_RE = re.compile(
+    r"\b(?:no|not|never|without|denies|denied|free of|absence of|"
+    r"haven'?t had|hasn'?t had|didn'?t have|don'?t have|doesn'?t have)\b",
+    re.IGNORECASE,
+)
+
+# The symptom happened in the past, or belongs to someone's history.
+_PAST_RE = re.compile(
+    r"\b(?:last (?:year|month|week)|years? ago|months? ago|weeks? ago|"
+    r"used to|history of|previously|in the past|as a child|when i was|"
+    r"since then|recovered from)\b",
+    re.IGNORECASE,
+)
+
+# How many characters either side of the match count as "context".
+_CONTEXT_WINDOW = 60
+
+
+def _suppressed_by_context(text_lower: str, symptom: str) -> bool:
+    """True when the words around `symptom` show it is not a live emergency."""
+    start = text_lower.find(symptom)
+    if start == -1:
+        return False
+
+    # Clip both sides to the clause the symptom actually sits in.
+    left_raw = text_lower[max(0, start - _CONTEXT_WINDOW):start]
+    right_raw = text_lower[start + len(symptom): start + len(symptom) + _CONTEXT_WINDOW]
+    left = _CLAUSE_SPLIT_RE.split(left_raw)[-1]
+    right = _CLAUSE_SPLIT_RE.split(right_raw)[0]
+    window = f"{left} {right}"
+
+    # An informational framing almost always precedes the symptom
+    # ("what are the signs of an overdose"), so only the left side counts.
+    if _INFORMATIONAL_RE.search(left):
+        return True
+    if _NEGATION_RE.search(left):
+        return True
+    if _PAST_RE.search(window):
+        return True
+    return False
+
+
 def detect_emergency_symptoms(text: str) -> Tuple[bool, List[str]]:
     """
-    Detects if text mentions emergency symptoms requiring immediate care.
+    Detect emergency symptoms that require immediate care.
+
+    A symptom only counts when it is being *reported as happening*. Questions
+    about what a symptom means, denials, and past-tense history are excluded —
+    see the context filters above.
 
     Returns:
         (has_emergency, detected_categories)
@@ -103,7 +184,7 @@ def detect_emergency_symptoms(text: str) -> Tuple[bool, List[str]]:
 
     for category, symptoms in EMERGENCY_SYMPTOMS.items():
         for symptom in symptoms:
-            if symptom in text_lower:
+            if symptom in text_lower and not _suppressed_by_context(text_lower, symptom):
                 detected.append(category)
                 break
 

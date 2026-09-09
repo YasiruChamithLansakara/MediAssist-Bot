@@ -1,0 +1,60 @@
+# MediAssist — production compose file
+#
+#   cp .env.docker.example .env.docker   # then fill in the two required values
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# The app listens on 8000 inside the container. Put a TLS terminator in front
+# of it before exposing it to the internet — Caddy, nginx or your host's
+# built-in proxy. See DEPLOYMENT.md.
+
+services:
+  mediassist:
+    build: .
+    image: mediassist:latest
+    container_name: mediassist
+    restart: unless-stopped
+
+    env_file:
+      - .env.docker
+
+    environment:
+      ENV: production
+      # Answers, and every ingredient of them, stay in the process.
+      USE_CONVERSATION_PERSISTENCE: "0"
+      MEMORY_TTL_HOURS: "2"
+      MEMORY_MAX_SESSIONS: "500"
+      RATE_LIMIT_ENABLED: "1"
+      RATE_LIMIT_RPM: "60"
+      RATE_LIMIT_BURST: "15"
+
+    ports:
+      # Bound to localhost: the reverse proxy is what faces the internet.
+      # Change to "8000:8000" only if you are exposing this directly and
+      # you understand that means plain HTTP.
+      - "127.0.0.1:8000:8000"
+
+    # The image is self-contained — dataset, model weights and prebuilt index
+    # are all baked in — so no volumes are needed. Mount one only if you want
+    # to swap the dataset without rebuilding:
+    # volumes:
+    #   - ./data/processed:/app/data/processed:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+    deploy:
+      resources:
+        limits:
+          # torch + faiss + easyocr models sit around 1.5 GB resident.
+          memory: 3G
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
