@@ -146,16 +146,60 @@ class TestFAISSStore:
             assert not store.is_ready()
 
     def test_faiss_store_build(self):
-        """Build succeeds when embeddings are available."""
+        """
+        Build indexes every drug as several section chunks.
+
+        build() returns a CHUNK count, not a drug count: each drug becomes an
+        identity chunk plus one chunk per populated label section. drug_count()
+        is the figure to assert against when you mean drugs.
+        """
         if not embeddings_available():
             pytest.skip("No embedding backend available")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FAISSStore(index_path=tmpdir)
             count = store.build(self.SAMPLE_DRUGS)
-            assert count == len(self.SAMPLE_DRUGS)
             assert store.is_ready()
-            assert store.vector_count() == len(self.SAMPLE_DRUGS)
+            assert store.drug_count() == len(self.SAMPLE_DRUGS)
+            # At least one identity chunk per drug, and more where sections exist.
+            assert count >= len(self.SAMPLE_DRUGS)
+            assert store.vector_count() == count
+
+    def test_faiss_chunks_carry_sections(self):
+        """Every chunk records which label section it came from."""
+        if not embeddings_available():
+            pytest.skip("No embedding backend available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            store.build(self.SAMPLE_DRUGS)
+
+            results = store.search("angioedema dry cough", top_k=3)
+            assert results, "expected at least one result"
+            sections = {r["section"] for r in results}
+            assert sections <= {
+                "identity", "indications", "warnings", "dosage", "contraindications"
+            }
+            # Results are grouped per drug — no drug appears twice.
+            ids = [r["drug_id"] for r in results]
+            assert len(ids) == len(set(ids))
+
+    def test_faiss_lexical_recall_on_exact_name(self):
+        """
+        A query that is just a drug name must find that drug.
+
+        This is the case pure dense retrieval handled badly and the reason
+        BM25 was added alongside it.
+        """
+        if not embeddings_available():
+            pytest.skip("No embedding backend available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FAISSStore(index_path=tmpdir)
+            store.build(self.SAMPLE_DRUGS)
+
+            results = store.search("lisinopril", top_k=3)
+            assert any(r["generic_name"] == "lisinopril" for r in results)
 
     def test_faiss_store_search(self):
         """Search returns relevant results."""
@@ -195,7 +239,10 @@ class TestFAISSStore:
             store2 = FAISSStore(index_path=tmpdir)
             assert store2.load() is True
             assert store2.is_ready()
-            assert store2.vector_count() == len(self.SAMPLE_DRUGS)
+            assert store2.drug_count() == len(self.SAMPLE_DRUGS)
+            assert store2.vector_count() == store.vector_count()
+            # The BM25 half must come back too, not just the vectors.
+            assert store2.status()["retrieval_mode"] == store.status()["retrieval_mode"]
 
             results = store2.search("blood pressure hypertension", top_k=1)
             assert len(results) > 0

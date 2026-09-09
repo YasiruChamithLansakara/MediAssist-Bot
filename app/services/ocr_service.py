@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.ner_service import DOSAGE_RE, FREQUENCY_RE, ROUTE_RE
 from app.services.ner_service import extract_medical_entities
+from app.services.interaction_service import check_interactions
 
 try:
     import pytesseract
@@ -183,18 +184,37 @@ def _preprocess_image(image):
 
 
 def ocr_runtime_status() -> Dict[str, Any]:
+    """
+    Report which OCR engines this process can actually use.
+
+    `easyocr_available` previously meant "the model is already loaded", which
+    made a correctly installed EasyOCR look unavailable until the first scan
+    had warmed it up — so a machine with EasyOCR but no Tesseract reported no
+    OCR at all. Installed-ness and loaded-ness are now reported separately,
+    and availability follows installed-ness, which is what callers mean when
+    they ask whether OCR works.
+    """
     cmd = os.getenv("TESSERACT_CMD", "").strip()
     executable = cmd or shutil.which("tesseract") or ""
     tesseract_ok = pytesseract is not None and Image is not None and bool(executable)
-    easyocr_ready = _easyocr_reader is not None  # only True after warmup or first use
-    configured = tesseract_ok or easyocr_ready
+
+    easyocr_installed = _easyocr_available()
+    easyocr_loaded = _easyocr_reader is not None
+
+    configured = tesseract_ok or easyocr_installed
     return {
         "available": configured,          # key the frontend checks
         "configured": configured,         # backward-compat alias
         "python_dependencies": pytesseract is not None and Image is not None,
         "tesseract_available": tesseract_ok,
-        "easyocr_available": easyocr_ready,
+        "easyocr_available": easyocr_installed,
+        "easyocr_model_loaded": easyocr_loaded,
         "tesseract_cmd": executable or None,
+        "engines": [
+            name
+            for name, ok in (("tesseract", tesseract_ok), ("easyocr", easyocr_installed))
+            if ok
+        ],
     }
 
 
@@ -434,6 +454,20 @@ def _detected_medicines(text: str, *, disease: str, age: int) -> List[Dict[str, 
     return medicines
 
 
+def _interaction_report(medicines: List[Dict[str, Any]], disease: str) -> Dict[str, Any]:
+    """
+    Check the medicines found on one prescription against each other.
+
+    This is the point of reading a whole prescription rather than one drug at
+    a time: a patient handed four medicines is exactly who an interaction
+    endangers, and every drug on the page has just been identified.
+    """
+    if len(medicines) < 2:
+        return {}
+    matches = [m.get("best_match") or {"generic_name_clean": m.get("drug")} for m in medicines]
+    return check_interactions(matches, disease=disease)
+
+
 def analyze_prescription_text(
     *,
     text: str,
@@ -448,6 +482,7 @@ def analyze_prescription_text(
         "context": {"disease": disease, "age": age},
         "ocr": {"text": cleaned, "confidence": None},
         "detected_medicines": detected,
+        "interactions": _interaction_report(detected, disease),
         "note": (
             "Educational demo only. Corrected OCR text can still contain mistakes; "
             "verify medicine names and instructions with a pharmacist or doctor."
@@ -480,6 +515,7 @@ def ocr_prescription_image(
         "file": {"name": filename},
         "ocr": {"text": text, "confidence": confidence, "engine": engine},
         "detected_medicines": detected,
+        "interactions": _interaction_report(detected, disease),
         "preprocessing": {
             "enabled": True,
             "method": "pil_upscale_grayscale_autocontrast_sharpen_angle_sweep_hybrid_tesseract_easyocr",
